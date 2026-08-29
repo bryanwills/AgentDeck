@@ -87,6 +87,8 @@ function checkPlatformio(boards, problems) {
     esp32dev: 'ESP32',
     'esp32-s3-devkitc-1': 'ESP32-S3',
     seeed_xiao_esp32s3: 'ESP32-S3',
+    'lilygo-t-display-s3': 'ESP32-S3',
+    'T5-ePaper-S3': 'ESP32-S3',
     'esp32-c6-devkitc-1': 'ESP32-C6',
     'esp32-p4': 'ESP32-P4',
   };

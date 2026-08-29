@@ -1880,6 +1880,8 @@ export function getSerialConnectionStatus(): Array<{
   sessionCount?: number;
   usageFiveH?: number;
   processingCount?: number;
+  repaintCount?: number;
+  fullRefreshCount?: number;
   deviceInfoFresh: boolean;
   transportOpen: boolean;
   lastReadAt: number;
@@ -1912,6 +1914,8 @@ export function getSerialConnectionStatus(): Array<{
     sessionCount: c.deviceInfo?.sessionCount,
     usageFiveH: c.deviceInfo?.usageFiveH,
     processingCount: c.deviceInfo?.processingCount,
+    repaintCount: c.deviceInfo?.repaintCount,
+    fullRefreshCount: c.deviceInfo?.fullRefreshCount,
     deviceInfoFresh: c.deviceInfoFresh,
     lastReadAt: c.lastReadAt,
     lastWriteAt: c.lastWriteAt,

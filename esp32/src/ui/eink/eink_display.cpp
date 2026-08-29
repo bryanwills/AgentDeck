@@ -1,10 +1,34 @@
-#ifdef BOARD_INKDECK
+#ifdef BOARD_EINK_SURFACE
 
 #include "eink_display.h"
 
 #include <Arduino.h>
+#include <Adafruit_GFX.h>
+#include <esp_heap_caps.h>
+#if defined(BOARD_LILYGO_EPD47)
+// The LilyGo driver declares its own incompatible GFXfont type, so including
+// epd_driver.h beside Adafruit_GFX is impossible. This display backend only
+// needs the C panel lifecycle ABI; keep the small, layout-identical surface
+// here and let the pinned upstream library compile its implementation.
+extern "C" {
+struct LilyEpdRect { int32_t x, y, width, height; };
+void epd_init();
+void epd_poweron();
+void epd_poweroff();
+void epd_draw_grayscale_image(LilyEpdRect area, uint8_t* data);
+}
+// GxEPD color constants are not available on the LilyGo parallel driver.
+#define GxEPD_BLACK 0x0000
+#define GxEPD_WHITE 0xFFFF
+#define GxEPD_RED   0xF800
+#else
 #include <SPI.h>
+#if defined(BOARD_NM_EPD_420)
+#include <GxEPD2_3C.h>
+#else
 #include <GxEPD2_BW.h>
+#endif
+#endif
 #include <U8g2_for_Adafruit_GFX.h>
 #include <Fonts/FreeSansBold18pt7b.h>
 #include <Fonts/FreeSansBold12pt7b.h>
@@ -22,18 +46,20 @@
 #include "ui/eink/eink_dashboard_layout.h"
 #include "util/usage_format.h"
 #include "util/utf8.h"
+#include "util/memory.h"
 
 namespace {
 
-// Pin map lives in boards/board_inkdeck.h (Seeed OG DIY Kit)
+#if !defined(BOARD_LILYGO_EPD47)
 constexpr int8_t PIN_EPD_SCK  = BOARD_PIN_EPD_SCK;
 constexpr int8_t PIN_EPD_MOSI = BOARD_PIN_EPD_MOSI;
 constexpr int8_t PIN_EPD_CS   = BOARD_PIN_EPD_CS;
 constexpr int8_t PIN_EPD_DC   = BOARD_PIN_EPD_DC;
 constexpr int8_t PIN_EPD_RST  = BOARD_PIN_EPD_RST;
 constexpr int8_t PIN_EPD_BUSY = BOARD_PIN_EPD_BUSY;
-constexpr uint8_t PIN_KEY1    = BOARD_PIN_KEY1;   // force full refresh
-constexpr uint8_t PIN_KEY2    = BOARD_PIN_KEY2;   // force full refresh (paging later)
+#endif
+constexpr uint8_t PIN_KEY1    = BOARD_PIN_KEY1;
+constexpr uint8_t PIN_KEY2    = BOARD_PIN_KEY2;
 
 // ===== Refresh policy =====
 // Partial refresh (~0.3s) accumulates ghosting on the UC8179; Good Display
@@ -45,12 +71,64 @@ constexpr uint8_t PIN_KEY2    = BOARD_PIN_KEY2;   // force full refresh (paging 
 // hibernate() deep-sleeps the controller and wipes its previous-frame RAM, so
 // the next partial refresh diffs against garbage → faint/ghosted text (the
 // "blurry text" bug on first hardware bring-up).
+#if defined(BOARD_NM_EPD_420)
+constexpr uint32_t MIN_REFRESH_INTERVAL_MS = 10000;
+#elif defined(BOARD_LILYGO_EPD47)
+constexpr uint32_t MIN_REFRESH_INTERVAL_MS = 5000;
+#else
 constexpr uint32_t MIN_REFRESH_INTERVAL_MS = 3000;
+#endif
 constexpr uint8_t  FULL_EVERY_N_PARTIALS   = 5;
 constexpr uint32_t FULL_MAX_AGE_MS         = 10UL * 60UL * 1000UL;
 
+#if defined(BOARD_LILYGO_EPD47)
+class LilyEpdCanvas final : public Adafruit_GFX {
+public:
+    LilyEpdCanvas() : Adafruit_GFX(SCREEN_W, SCREEN_H), pixels_(nullptr) {}
+
+    bool begin() {
+        constexpr size_t FRAME_BYTES = (size_t)SCREEN_W * SCREEN_H / 2;
+        // Device-lifetime owner. A 259,200-byte 4-bit framebuffer cannot live
+        // on the task stack; allocate once in PSRAM and reuse every render.
+        pixels_ = static_cast<uint8_t*>(heap_caps_calloc(
+            FRAME_BYTES, 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        if (!pixels_) {
+            Serial.printf("[Eink] LilyGo framebuffer alloc failed (%u bytes)\n",
+                          (unsigned)FRAME_BYTES);
+            return false;
+        }
+        memset(pixels_, 0xFF, FRAME_BYTES);
+        logHeap("lily-epd-framebuffer");
+        return true;
+    }
+
+    void drawPixel(int16_t x, int16_t y, uint16_t color) override {
+        if (!pixels_ || x < 0 || y < 0 || x >= SCREEN_W || y >= SCREEN_H) return;
+        const size_t i = ((size_t)y * SCREEN_W + (size_t)x) / 2;
+        const uint8_t shade = color == GxEPD_WHITE ? 0x0F : 0x00;
+        if (x & 1) pixels_[i] = (uint8_t)((pixels_[i] & 0x0F) | (shade << 4));
+        else       pixels_[i] = (uint8_t)((pixels_[i] & 0xF0) | shade);
+    }
+
+    void fillScreen(uint16_t color) override {
+        if (pixels_) memset(pixels_, color == GxEPD_WHITE ? 0xFF : 0x00,
+                            (size_t)SCREEN_W * SCREEN_H / 2);
+    }
+
+    uint8_t* pixels() { return pixels_; }
+
+private:
+    uint8_t* pixels_;  // owned for device lifetime; intentionally never freed
+};
+
+LilyEpdCanvas display;
+#elif defined(BOARD_NM_EPD_420)
+using Panel = GxEPD2_420c_GDEY042Z98;
+GxEPD2_3C<Panel, Panel::HEIGHT> display(Panel(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
+#else
 using Panel = GxEPD2_750_GDEY075T7;
 GxEPD2_BW<Panel, Panel::HEIGHT> display(Panel(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
+#endif
 // UTF-8/한글 renderer for dynamic text (project names, prompts, activity,
 // ticker). GFX FreeFonts are Latin-only — Korean previously degraded to
 // "######?" garbage via the ASCII sanitizer.
@@ -1003,6 +1081,330 @@ void drawSessionGrid(const Snap& s, const AgentDeckEink::Layout& layout) {
     }
 }
 
+// ===== Paper faces =====
+// A face is a different information contract, not a visual theme. The push
+// InkDeck exposes the full five-face set. Pull-default readers expose the
+// durable GLANCE/DIGEST/ROSTER base set. DECISION and ANSWER become eligible
+// only while a physical action has opened an eight-minute interactive lease.
+enum class PaperFace : uint8_t { Glance, Decision, Answer, Digest, Roster };
+
+PaperFace renderFace = PaperFace::Glance;
+PaperFace manualFace = PaperFace::Glance;
+uint32_t faceHoldUntilMs = 0;
+uint32_t interactiveLeaseUntilMs = 0;
+uint32_t suppressedDecisionHash = 0;
+uint32_t lastDecisionHash = 0;
+uint32_t lastAnswerHash = 0;
+bool sawProcessing = false;
+
+constexpr uint32_t FACE_HOLD_MS = 8UL * 60UL * 1000UL;
+
+bool interactiveLeaseActive(uint32_t now) {
+#if defined(BOARD_INKDECK) && !defined(BOARD_SIM_PULL)
+    (void)now;
+    return true;
+#else
+    return interactiveLeaseUntilMs != 0 &&
+           (int32_t)(interactiveLeaseUntilMs - now) > 0;
+#endif
+}
+
+const char* faceName(PaperFace face) {
+    switch (face) {
+        case PaperFace::Decision: return "DECISION";
+        case PaperFace::Answer:   return "ANSWER";
+        case PaperFace::Digest:   return "DIGEST";
+        case PaperFace::Roster:   return "ROSTER";
+        default:                  return "GLANCE";
+    }
+}
+
+uint16_t accentColor() {
+#if defined(BOARD_NM_EPD_420)
+    return GxEPD_RED;
+#else
+    return GxEPD_BLACK;
+#endif
+}
+
+int primarySession(const Snap& s, AgentDeckEink::StatusKind wanted) {
+    for (uint8_t i = 0; i < s.rowCount; i++)
+        if (AgentDeckEink::classifyStatus(s.rows[i].state) == wanted) return i;
+    return -1;
+}
+
+int primarySession(const Snap& s) {
+    int i = primarySession(s, AgentDeckEink::StatusKind::Attention);
+    if (i >= 0) return i;
+    i = primarySession(s, AgentDeckEink::StatusKind::Processing);
+    if (i >= 0) return i;
+    i = primarySession(s, AgentDeckEink::StatusKind::Idle);
+    return i >= 0 ? i : (s.rowCount ? 0 : -1);
+}
+
+uint32_t decisionHash(const Snap& s) {
+    uint32_t h = 2166136261u;
+    for (uint8_t i = 0; i < s.rowCount; i++) {
+        if (!isAwaiting(s.rows[i].state)) continue;
+        h = fnvStr(h, s.rows[i].name);
+        h = fnvStr(h, s.rows[i].state);
+        h = fnvStr(h, s.rows[i].question);
+    }
+    for (uint8_t i = 0; i < s.optionCount; i++) h = fnvStr(h, s.options[i]);
+    return h;
+}
+
+uint32_t answerHash(const Snap& s) {
+    int i = primarySession(s, AgentDeckEink::StatusKind::Idle);
+    if (i < 0) return 0;
+    uint32_t h = 2166136261u;
+    h = fnvStr(h, s.rows[i].name);
+    h = fnvStr(h, s.rows[i].work);
+    return h;
+}
+
+uint32_t paperHash(const Snap& s, PaperFace face) {
+    uint32_t h = 2166136261u;
+    h = fnv(h, &face, sizeof(face));
+    h = fnv(h, &s.bridgeConnected, sizeof(s.bridgeConnected));
+    h = fnv(h, &s.rowCount, sizeof(s.rowCount));
+    if (face == PaperFace::Decision) return fnv(h, &lastDecisionHash, sizeof(lastDecisionHash));
+    if (face == PaperFace::Answer) return fnv(h, &lastAnswerHash, sizeof(lastAnswerHash));
+    if (face == PaperFace::Roster) return contentHash(s);
+    if (face == PaperFace::Digest) {
+        for (uint8_t i = 0; i < s.tickerCount; i++) {
+            h = fnvStr(h, s.tickerTime[i]);
+            h = fnvStr(h, s.tickerText[i]);
+        }
+        return h;
+    }
+    // GLANCE deliberately ignores live tool/activity churn. It changes only on
+    // session state, durable milestone, counts, or integer usage movement.
+    for (uint8_t i = 0; i < s.rowCount; i++) {
+        h = fnvStr(h, s.rows[i].name);
+        h = fnvStr(h, s.rows[i].state);
+        h = fnvStr(h, s.rows[i].work);
+    }
+    int fh = (int)s.fiveH, sd = (int)s.sevenD, cp = (int)s.codexP, cs = (int)s.codexS;
+    h = fnv(h, &fh, sizeof(fh)); h = fnv(h, &sd, sizeof(sd));
+    h = fnv(h, &cp, sizeof(cp)); h = fnv(h, &cs, sizeof(cs));
+    return h;
+}
+
+int drawParagraph(int16_t x, int16_t y, int16_t maxW, int16_t lineH,
+                  int maxLines, const char* text, const GFXfont* font) {
+    if (!text || !text[0]) return 0;
+    const char* p = text;
+    int lines = 0;
+    while (*p && lines < maxLines) {
+        while (*p == ' ') p++;
+        size_t remain = strlen(p);
+        size_t take = remain < 180 ? remain : utf8Boundary(p, 179);
+        char line[184];
+        while (take > 1) {
+            memcpy(line, p, take); line[take] = '\0';
+            if (smartWidth(line, font) <= maxW) break;
+            take = utf8Boundary(p, take - 1);
+        }
+        if (take < remain) {
+            size_t space = take;
+            while (space > 0 && p[space] != ' ') space--;
+            if (space > take / 2) take = space;
+        }
+        if (lines == maxLines - 1 && take < remain) {
+            smartFitText(line, sizeof(line), p, maxW, font);
+            smartTextAt(x, y + lines * lineH, line, font);
+            return lines + 1;
+        }
+        memcpy(line, p, take); line[take] = '\0';
+        smartTextAt(x, y + lines * lineH, line, font);
+        p += take;
+        lines++;
+    }
+    return lines;
+}
+
+void drawPaperHeader(const Snap& s, PaperFace face) {
+    const int16_t pad = W <= 420 ? 12 : 20;
+    const int16_t headerH = W <= 420 ? 48 : 62;
+    const uint16_t accent = face == PaperFace::Decision ? accentColor() : GxEPD_BLACK;
+    display.fillRect(0, 0, W, W <= 420 ? 7 : 9, accent);
+    drawAgentDeckMark(pad, 10, W <= 420 ? 30 : 40);
+    textAt(pad + (W <= 420 ? 40 : 54), W <= 420 ? 36 : 46,
+           faceName(face), W <= 420 ? &FreeSansBold12pt7b : &FreeSansBold18pt7b);
+    const char* mode =
+#if defined(BOARD_INKDECK) && !defined(BOARD_SIM_PULL)
+        "PUSH";
+#else
+        "PULL";
+#endif
+    char status[40];
+    snprintf(status, sizeof(status), "%s / %s", mode, s.bridgeConnected ? "LINK" : "OFFLINE");
+    textRight(W - pad, W <= 420 ? 34 : 42, status,
+              W <= 420 ? CLASSIC_FONT : &FreeSansBold9pt7b);
+    display.drawFastHLine(pad, headerH, W - pad * 2, GxEPD_BLACK);
+}
+
+void drawMiniUsage(int16_t x, int16_t y, int16_t w, const char* label, float pct) {
+    textAt(x, y + 10, label, CLASSIC_FONT);
+    const int16_t bx = x + 28;
+    const int16_t bw = w - 60;
+    display.drawRect(bx, y, bw, 11, GxEPD_BLACK);
+    if (pct >= 0) {
+        int fill = (int)((bw - 4) * min(100.0f, max(0.0f, pct)) / 100.0f);
+        display.fillRect(bx + 2, y + 2, fill, 7, GxEPD_BLACK);
+    }
+    char value[10]; snprintf(value, sizeof(value), pct >= 0 ? "%d%%" : "--", (int)pct);
+    textRight(x + w, y + 10, value, CLASSIC_FONT);
+}
+
+void drawGlanceFace(const Snap& s) {
+    drawPaperHeader(s, PaperFace::Glance);
+    const int16_t top = W <= 420 ? 62 : 82;
+    const int16_t pad = W <= 420 ? 12 : 22;
+    const int16_t sideW = W <= 420 ? 104 : 190;
+    uint8_t attention = 0, working = 0, quiet = 0;
+    for (uint8_t i = 0; i < s.rowCount; i++) {
+        switch (AgentDeckEink::classifyStatus(s.rows[i].state)) {
+            case AgentDeckEink::StatusKind::Attention: attention++; break;
+            case AgentDeckEink::StatusKind::Processing: working++; break;
+            default: quiet++; break;
+        }
+    }
+    display.drawFastVLine(sideW, top, H - top - pad, GxEPD_BLACK);
+    const GFXfont* big = W <= 420 ? &FreeSansBold18pt7b : &FreeSansBold18pt7b;
+    char n[8]; snprintf(n, sizeof(n), "%u", attention);
+    textAt(pad, top + 36, n, big);
+    textAt(pad, top + 55, "NEEDS YOU", CLASSIC_FONT);
+    snprintf(n, sizeof(n), "%u", working);
+    textAt(pad, top + (W <= 420 ? 92 : 112), n, big);
+    textAt(pad, top + (W <= 420 ? 111 : 131), "WORKING", CLASSIC_FONT);
+    snprintf(n, sizeof(n), "%u", quiet);
+    textAt(pad, top + (W <= 420 ? 148 : 190), n, big);
+    textAt(pad, top + (W <= 420 ? 167 : 209), "QUIET", CLASSIC_FONT);
+
+    const int i = primarySession(s);
+    const int16_t x = sideW + (W <= 420 ? 14 : 24);
+    const int16_t maxW = W - x - pad;
+    if (i < 0) {
+        textAt(x, top + 44, "Quiet paper.", big);
+        drawParagraph(x, top + 76, maxW, 22, 3,
+                      "No active sessions. The page will wake when AgentDeck has something durable to show.",
+                      &FreeSans9pt7b);
+    } else {
+        const RowSnap& r = s.rows[i];
+        char name[64]; smartFitText(name, sizeof(name), r.name[0] ? r.name : "AgentDeck", maxW, big);
+        smartTextAt(x, top + 34, name, big);
+        char state[20]; stateLabel(r.state, state, sizeof(state));
+        textAt(x, top + 58, state, &FreeSansBold9pt7b);
+        const bool awaitingRow = isAwaiting(r.state);
+        const bool processingRow =
+            AgentDeckEink::classifyStatus(r.state) == AgentDeckEink::StatusKind::Processing;
+        const char* body = awaitingRow
+            ? (r.question[0] ? r.question
+                             : "Decision waiting. Use the primary control to open it.")
+            : (r.work[0] ? r.work
+                         : (r.activity[0] ? r.activity
+                                          : (r.tool[0] ? r.tool
+                                                       : (processingRow
+                                                           ? "Work is in progress. This page waits for a durable result."
+                                                           : "Standing by."))));
+        drawParagraph(x, top + (W <= 420 ? 86 : 98), maxW,
+                      W <= 420 ? 20 : 24, W <= 420 ? 4 : 4, body, &FreeSans9pt7b);
+    }
+    if (W > 600 && s.rowCount > 0) {
+        const int16_t listY = H - 142;
+        display.drawFastHLine(x, listY - 12, maxW, GxEPD_BLACK);
+        textAt(x, listY, "ACTIVE THREADS", CLASSIC_FONT);
+        const uint8_t shown = s.rowCount < 3 ? s.rowCount : 3;
+        for (uint8_t row = 0; row < shown; row++) {
+            const RowSnap& r = s.rows[row];
+            const int16_t ry = listY + 27 + row * 27;
+            char state[20]; stateLabel(r.state, state, sizeof(state));
+            char left[64]; snprintf(left, sizeof(left), "%02u  %s", (unsigned)(row + 1), r.name);
+            char fitted[68]; smartFitText(fitted, sizeof(fitted), left, maxW * 2 / 3, &FreeSans9pt7b);
+            smartTextAt(x, ry, fitted, &FreeSans9pt7b);
+            textRight(W - pad, ry, state, CLASSIC_FONT);
+        }
+    }
+    const int16_t usageY = H - (W <= 420 ? 27 : 38);
+    const int16_t uw = (W - x - pad - 12) / 2;
+    drawMiniUsage(x, usageY, uw, "CLA", s.fiveH);
+    drawMiniUsage(x + uw + 12, usageY, uw, "CDX", s.codexP);
+}
+
+void drawDecisionFace(const Snap& s) {
+    drawPaperHeader(s, PaperFace::Decision);
+    const int i = primarySession(s, AgentDeckEink::StatusKind::Attention);
+    const int16_t pad = W <= 420 ? 16 : 28;
+    const int16_t top = W <= 420 ? 70 : 90;
+    display.fillRect(0, top, W <= 420 ? 8 : 12, H - top, accentColor());
+    if (i < 0) {
+        textAt(pad, top + 40, "Decision cleared.", &FreeSansBold18pt7b);
+        return;
+    }
+    const RowSnap& r = s.rows[i];
+    smartTextAt(pad, top + 20, r.name, &FreeSansBold9pt7b);
+    const int questionLines = W <= 420 ? 3 : 5;
+    int used = drawParagraph(pad, top + (W <= 420 ? 50 : 62), W - pad * 2,
+                             W <= 420 ? 24 : 30, questionLines,
+                             r.question[0] ? r.question : "Agent is waiting for your decision.",
+                             W <= 420 ? &FreeSansBold12pt7b : &FreeSansBold18pt7b);
+    int16_t oy = top + (W <= 420 ? 62 : 78) + used * (W <= 420 ? 24 : 30);
+    for (uint8_t o = 0; o < s.optionCount && o < 3 && oy < H - 24; o++) {
+        const int16_t oh = W <= 420 ? 31 : 42;
+        display.drawRoundRect(pad, oy, W - pad * 2, oh, 5, o == 0 ? accentColor() : GxEPD_BLACK);
+        char option[56]; snprintf(option, sizeof(option), "%u  %s", (unsigned)(o + 1), s.options[o]);
+        char fitted[64]; smartFitText(fitted, sizeof(fitted), option, W - pad * 2 - 20, &FreeSans9pt7b);
+        smartTextAt(pad + 10, oy + (W <= 420 ? 21 : 28), fitted, &FreeSans9pt7b);
+        oy += oh + 7;
+    }
+}
+
+void drawAnswerFace(const Snap& s) {
+    drawPaperHeader(s, PaperFace::Answer);
+    int i = primarySession(s, AgentDeckEink::StatusKind::Idle);
+    if (i < 0) i = primarySession(s);
+    const int16_t pad = W <= 420 ? 16 : 30;
+    const int16_t top = W <= 420 ? 72 : 94;
+    if (i < 0) { textAt(pad, top + 40, "No answer yet.", &FreeSansBold18pt7b); return; }
+    const RowSnap& r = s.rows[i];
+    drawAgentGlyph(r.agentType, pad, top, W <= 420 ? 44 : 72);
+    smartTextAt(pad + (W <= 420 ? 58 : 92), top + 28, r.name, &FreeSansBold12pt7b);
+    display.drawFastHLine(pad, top + (W <= 420 ? 58 : 82), W - pad * 2, GxEPD_BLACK);
+    const char* body = r.work[0] ? r.work : "The session is quiet. Its next durable result will appear here.";
+    drawParagraph(pad, top + (W <= 420 ? 90 : 124), W - pad * 2,
+                  W <= 420 ? 23 : 29, W <= 420 ? 5 : 9, body,
+                  W <= 420 ? &FreeSans9pt7b : &FreeSansBold12pt7b);
+    if (r.model[0]) textRight(W - pad, H - 15, r.model, CLASSIC_FONT);
+}
+
+void drawDigestFace(const Snap& s) {
+    drawPaperHeader(s, PaperFace::Digest);
+    const int16_t pad = W <= 420 ? 14 : 24;
+    const int16_t top = W <= 420 ? 62 : 82;
+    const int rows = W <= 420 ? 3 : 4;
+    const int16_t rowH = (H - top - pad) / rows;
+    for (int row = 0; row < rows; row++) {
+        const char* time = "";
+        const char* body = "No further durable activity.";
+        if (row < s.tickerCount) {
+            time = s.tickerTime[row]; body = s.tickerText[row];
+        } else {
+            int si = row - s.tickerCount;
+            if (si < s.rowCount) body = s.rows[si].work[0] ? s.rows[si].work : s.rows[si].name;
+        }
+        const int16_t y = top + row * rowH;
+        char idx[6]; snprintf(idx, sizeof(idx), "%02d", row + 1);
+        textAt(pad, y + 24, idx, &FreeSansBold12pt7b);
+        if (time[0]) textAt(pad, y + 43, time, CLASSIC_FONT);
+        drawParagraph(pad + (W <= 420 ? 50 : 72), y + 22,
+                      W - pad * 2 - (W <= 420 ? 50 : 72),
+                      W <= 420 ? 18 : 22, W <= 420 ? 2 : 3, body, &FreeSans9pt7b);
+        if (row < rows - 1) display.drawFastHLine(pad, y + rowH - 1, W - pad * 2, GxEPD_BLACK);
+    }
+}
+
 void drawSearching(const Snap& s) {
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
@@ -1025,10 +1427,19 @@ void drawDashboard(const Snap& s) {
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
     setInk(false);
-    const AgentDeckEink::Layout layout = dashboardLayout(s);
-    drawBrandHeader(s, layout);
-    drawSessionGrid(s, layout);
-    drawUsageFooter(s, false, layout);
+    switch (renderFace) {
+        case PaperFace::Decision: drawDecisionFace(s); break;
+        case PaperFace::Answer:   drawAnswerFace(s); break;
+        case PaperFace::Digest:   drawDigestFace(s); break;
+        case PaperFace::Roster: {
+            const AgentDeckEink::Layout layout = dashboardLayout(s);
+            drawBrandHeader(s, layout);
+            drawSessionGrid(s, layout);
+            drawUsageFooter(s, false, layout);
+            break;
+        }
+        default: drawGlanceFace(s); break;
+    }
     // NOTE: no Serial logging here — this runs on Core 1 while Core 0 emits
     // protocol JSON lines (device_info replies, acks). Cross-core prints
     // interleave mid-line and corrupt the newline-framed JSON the daemon
@@ -1059,6 +1470,23 @@ void refresh(void (*draw)(const Snap&), const Snap& s, bool full) {
     // network and UI tasks without putting a lock around a multi-second draw.
     __atomic_add_fetch(&repaintCountValue, 1u, __ATOMIC_RELAXED);
     if (full) __atomic_add_fetch(&fullRefreshCountValue, 1u, __ATOMIC_RELAXED);
+#if defined(BOARD_LILYGO_EPD47)
+    (void)full;
+    display.fillScreen(GxEPD_WHITE);
+    draw(s);
+    epd_poweron();
+    const LilyEpdRect fullArea{0, 0, SCREEN_W, SCREEN_H};
+    epd_draw_grayscale_image(fullArea, display.pixels());
+    epd_poweroff();
+    partialCount = 0;
+    lastFullMs = millis();
+#else
+#if defined(BOARD_NM_EPD_420)
+    // The standard tri-color panel has no partial waveform. Treat every
+    // admitted repaint as full-window I/O and never ask GxEPD2 for a fake
+    // partial update that still takes ~10 seconds.
+    full = true;
+#endif
     if (full) {
         display.setFullWindow();
         partialCount = 0;
@@ -1072,6 +1500,7 @@ void refresh(void (*draw)(const Snap&), const Snap& s, bool full) {
     // powerOff (NOT hibernate): high voltage off, controller previous-frame
     // RAM retained so the next partial refresh diffs cleanly. See note above.
     display.powerOff();
+#endif
 }
 
 }  // namespace
@@ -1088,7 +1517,17 @@ uint32_t fullRefreshCount() {
 
 void init() {
     pinMode(PIN_KEY1, INPUT_PULLUP);
-    pinMode(PIN_KEY2, INPUT_PULLUP);
+    if (PIN_KEY2 != PIN_KEY1) pinMode(PIN_KEY2, INPUT_PULLUP);
+#if defined(BOARD_LILYGO_EPD47)
+    if (!display.begin()) {
+        while (true) vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    epd_init();
+    display.setRotation(0);
+    u8f.begin(display);
+    Serial.printf("[Eink] LilyGo ED047TC2 init %dx%d, PSRAM framebuffer=%u bytes\n",
+                  display.width(), display.height(), (unsigned)(SCREEN_W * SCREEN_H / 2));
+#else
     SPI.begin(PIN_EPD_SCK, -1, PIN_EPD_MOSI, PIN_EPD_CS);
     // serial_diag_bitrate MUST stay 0: GxEPD2's diagnostics print _PowerOn/
     // _Update_* timing lines from THIS core (Core 1) on every refresh, which
@@ -1098,9 +1537,15 @@ void init() {
     display.init(0, true, 2, false);
     display.setRotation(0);
     u8f.begin(display);  // UTF-8/한글 text path (unifont) on the same canvas
-    Serial.printf("[Eink] GDEY075T7 init %dx%d, partial=%d\n",
+    Serial.printf("[Eink] %s init %dx%d, partial=%d\n",
+#if defined(BOARD_NM_EPD_420)
+                  "GDEY042Z98",
+#else
+                  "GDEY075T7",
+#endif
                   display.width(), display.height(),
                   (int)display.epd2.hasFastPartialUpdate);
+#endif
     // static: Snap grew past 5KB (10 rows × work[152] + the multi-row strip)
     // — too big for the loop-task stack alongside the GxEPD2 page render.
     // init() and render() run on the same Core 1 loop task, so one static
@@ -1119,12 +1564,52 @@ void init() {
 
 void update(float /*dt*/) {
     uint32_t now = millis();
-    bool k1 = digitalRead(PIN_KEY1), k2 = digitalRead(PIN_KEY2);
-    if (((key1Prev && !k1) || (key2Prev && !k2)) && now - keyLastMs > 300) {
+    bool k1 = digitalRead(PIN_KEY1);
+    bool k2 = PIN_KEY2 == PIN_KEY1 ? k1 : digitalRead(PIN_KEY2);
+    const bool key1Pressed = key1Prev && !k1;
+    const bool key2Pressed = key2Prev && !k2;
+    if ((key1Pressed || key2Pressed) && now - keyLastMs > 300) {
         keyLastMs = now;
+        if (PIN_KEY2 != PIN_KEY1 && key2Pressed) {
+            // The same physical escape action from every face. A still-open
+            // decision stays suppressed only for this exact question hash; a
+            // new question immediately preempts GLANCE again.
+            if (renderFace == PaperFace::Decision) suppressedDecisionHash = lastDecisionHash;
+            manualFace = PaperFace::Glance;
+            faceHoldUntilMs = 0;
+            interactiveLeaseUntilMs = 0;
+        } else {
+#if defined(BOARD_INKDECK) && !defined(BOARD_SIM_PULL)
+            switch (manualFace) {
+                case PaperFace::Glance: manualFace = PaperFace::Digest; break;
+                case PaperFace::Digest: manualFace = PaperFace::Answer; break;
+                case PaperFace::Answer: manualFace = PaperFace::Roster; break;
+                default: manualFace = PaperFace::Glance; break;
+            }
+#else
+            // A physical action opens the bounded pull-device lease. On LilyGo
+            // this is also the invariant escape key: one press opens DIGEST
+            // from GLANCE; the same press returns to GLANCE from every other
+            // face and cancels the lease.
+            if (PIN_KEY1 == PIN_KEY2) {
+                if (renderFace == PaperFace::Decision) suppressedDecisionHash = lastDecisionHash;
+                if (renderFace == PaperFace::Glance) {
+                    manualFace = PaperFace::Digest;
+                    interactiveLeaseUntilMs = now + FACE_HOLD_MS;
+                } else {
+                    manualFace = PaperFace::Glance;
+                    interactiveLeaseUntilMs = 0;
+                }
+            } else {
+                manualFace = renderFace == PaperFace::Glance
+                    ? PaperFace::Digest : PaperFace::Glance;
+                interactiveLeaseUntilMs = now + FACE_HOLD_MS;
+            }
+#endif
+            faceHoldUntilMs = manualFace == PaperFace::Glance ? 0 : now + FACE_HOLD_MS;
+        }
         forceFull = true;
         lastHash = 0;  // force redraw even if content unchanged
-        Serial.println("[Eink] button → full refresh");
     }
     key1Prev = k1; key2Prev = k2;
 }
@@ -1140,23 +1625,42 @@ void render() {
     // awake even if its monitors are off.
 
     bool searching = !s.bridgeConnected;
-    uint32_t h = contentHash(s);
-    // Ticker is outside the hash (tool-event churn must not strobe the
-    // panel): it earns its own redraw at most once a minute; otherwise it
-    // piggybacks on whatever refresh the hashed content triggers. The FIRST
-    // ticker (blank → text) draws immediately — an empty bottom line for up
-    // to a minute after boot read as "timeline broken".
-    bool tickerDue = s.tickerCount > 0 &&
-                     strcmp(s.tickerText[0], lastTickerShown) != 0 &&
-                     (lastTickerShown[0] == '\0' || (now - lastDrawMs) >= 60000);
-    if (h == lastHash && !forceFull && !tickerDue) return;
+    const bool leaseActive = interactiveLeaseActive(now);
+    const int awaiting = primarySession(s, AgentDeckEink::StatusKind::Attention);
+    const int processing = primarySession(s, AgentDeckEink::StatusKind::Processing);
+    if (processing >= 0) sawProcessing = true;
+    const uint32_t currentAnswer = answerHash(s);
+    if (sawProcessing && processing < 0 && currentAnswer != 0 &&
+        currentAnswer != lastAnswerHash && leaseActive) {
+        lastAnswerHash = currentAnswer;
+        manualFace = PaperFace::Answer;
+        faceHoldUntilMs = now + FACE_HOLD_MS;
+        sawProcessing = false;
+    }
+    lastDecisionHash = decisionHash(s);
+    if (searching) {
+        renderFace = PaperFace::Roster;
+    } else if (awaiting >= 0 && lastDecisionHash != suppressedDecisionHash && leaseActive) {
+        renderFace = PaperFace::Decision;
+    } else if (!searching && faceHoldUntilMs != 0 && (int32_t)(faceHoldUntilMs - now) > 0) {
+        renderFace = manualFace;
+    } else {
+        manualFace = PaperFace::Glance;
+        faceHoldUntilMs = 0;
+        renderFace = PaperFace::Glance;
+    }
+    uint32_t h = paperHash(s, renderFace);
+    if (h == lastHash && !forceFull) return;
     if (!forceFull && (now - lastDrawMs) < MIN_REFRESH_INTERVAL_MS) return;  // coalesce bursts
 
     bool full = forceFull || firstDraw ||
                 partialCount >= FULL_EVERY_N_PARTIALS ||
                 (now - lastFullMs) > FULL_MAX_AGE_MS ||
                 (searching != wasSearching);
-    refresh(searching ? drawSearching : drawDashboard, s, full);
+#if defined(BOARD_NM_EPD_420) || defined(BOARD_LILYGO_EPD47)
+    full = true;
+#endif
+    refresh(drawDashboard, s, full);
 
     lastHash = h;
     lastDrawMs = now;
@@ -1169,4 +1673,4 @@ void render() {
 
 }  // namespace Eink
 
-#endif  // BOARD_INKDECK
+#endif  // BOARD_EINK_SURFACE

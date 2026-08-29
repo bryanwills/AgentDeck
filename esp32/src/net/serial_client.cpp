@@ -17,8 +17,11 @@
 #include "../input/power_monitor.h"
 #include "../camera/photo_capture.h"
 #endif
-#if !defined(BOARD_LED8X32) && !defined(BOARD_INKDECK)
+#if !defined(BOARD_LED8X32) && !defined(BOARD_EINK_SURFACE)
 #include "../ui/screens/splash.h"
+#endif
+#if defined(BOARD_EINK_SURFACE)
+#include "../ui/eink/eink_display.h"
 #endif
 #include <Arduino.h>
 #include <WiFi.h>
@@ -28,7 +31,7 @@
 // usage_update is ~1KB but a 10-session enriched sessions_list plus growth
 // must never hit the silent "Buffer overflow — discard line" path again
 // (an oversized line froze usage gauges on stale values for hours).
-#if defined(BOARD_INKDECK)
+#if defined(BOARD_EINK_SURFACE)
 static constexpr int SERIAL_BUF_SIZE = 8192;
 #else
 static constexpr int SERIAL_BUF_SIZE = 4096;
@@ -50,7 +53,7 @@ namespace Net {
 static void sendHeartbeatAck();
 
 void serialWriteJsonLine(const char* buf) {
-#if defined(BOARD_INKDECK) || defined(BOARD_T_DISPLAY_PRO)
+#if defined(BOARD_EINK_SURFACE) || defined(BOARD_T_DISPLAY_PRO)
     // HWCDC (USB-Serial/JTAG) on this core loses entire 64-byte FIFO blocks
     // when a write spans multiple blocks (measured: deterministic 64-byte
     // holes mid-line, 7/10 corrupt device_info replies). Pace one FIFO block
@@ -87,6 +90,10 @@ static void sendDeviceInfoSerial() {
 
     #if defined(BOARD_LED8X32)
     resp["board"] = "ulanzi_tc001";
+    #elif defined(BOARD_NM_EPD_420)
+    resp["board"] = "nm_epd_420";
+    #elif defined(BOARD_LILYGO_EPD47)
+    resp["board"] = "lilygo_epd47";
     #elif defined(BOARD_INKDECK)
     resp["board"] = "inkdeck";
     #elif defined(BOARD_TTGO)
@@ -124,6 +131,14 @@ static void sendDeviceInfoSerial() {
     resp["wifiConnected"] = wifiConnected();
     resp["wifiRadioParked"] = wifiRadioParked();
     resp["uptimeSec"] = millis() / 1000;
+#if defined(BOARD_EINK_SURFACE)
+    // Keep the unsolicited USB device_info frame in lockstep with the
+    // request/WS path in protocol.cpp. This is the first frame the daemon
+    // normally records after a cable attach, so omitting the counters here
+    // would make the repaint telemetry appear only after a later probe.
+    resp["repaintCount"] = Eink::repaintCount();
+    resp["fullRefreshCount"] = Eink::fullRefreshCount();
+#endif
     {
         esp_reset_reason_t resetReason = esp_reset_reason();
         resp["resetReasonCode"] = (int)resetReason;

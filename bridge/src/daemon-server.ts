@@ -1306,6 +1306,8 @@ function buildNodeModuleHealth(startedModules: DeviceModule[]): Record<string, u
         sessionCount: status.sessionCount,
         usageFiveH: status.usageFiveH,
         processingCount: status.processingCount,
+        repaintCount: status.repaintCount,
+        fullRefreshCount: status.fullRefreshCount,
         deviceInfoFresh: status.deviceInfoFresh,
       } : null,
       lastReadAt: status.lastReadAt,

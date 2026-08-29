@@ -14,7 +14,7 @@ validators: [bash esp32/robot/run.sh build]
 ---
 # ESP32 Firmware
 
-PlatformIO Arduino firmware for LVGL touch displays (ESP32-S3: 86Box 480×480, IPS 3.5" 480×320 landscape / 320×480 portrait, Round AMOLED 360×360; ESP32-P4: Guition JC8012P4A1C 10.1" IPS 800×1280 portrait native + ESP32-C6 co-processor) + SPI TFT displays (ESP32 classic: LilyGO TTGO T-Display 1.14" 135×240 with a 160px terrarium viewport + 80px metric strip) + WS2812B LED matrix (ESP32 classic: Ulanzi TC001 8×32). Board-specific `#ifdef`, per-board partition tables, FastLED matrix renderer bypasses LVGL entirely. IPS 3.5" supports runtime portrait↔landscape switching via `set_orientation` protocol command or Settings toggle (NVS persistent, `g_screenW`/`g_screenH` runtime globals).
+PlatformIO Arduino firmware for LVGL touch displays (ESP32-S3: 86Box 480×480, IPS 3.5" 480×320 landscape / 320×480 portrait, Round AMOLED 360×360; ESP32-P4: Guition JC8012P4A1C 10.1" IPS 800×1280 portrait native + ESP32-C6 co-processor), three e-ink surfaces (InkDeck 800×480, RockBase NM-EPD-420 400×300 tri-color, LilyGo EPD47 960×540 grayscale), SPI TFT displays (ESP32 classic: LilyGO TTGO T-Display 1.14" 135×240 with a 160px terrarium viewport + 80px metric strip), and a WS2812B LED matrix (ESP32 classic: Ulanzi TC001 8×32). Board-specific `#ifdef`, per-board partition tables, FastLED matrix renderer bypasses LVGL entirely. IPS 3.5" supports runtime portrait↔landscape switching via `set_orientation` protocol command or Settings toggle (NVS persistent, `g_screenW`/`g_screenH` runtime globals).
 
 ## Host simulator (no-hardware preview)
 
@@ -27,7 +27,7 @@ counterpart to the Node preview tools (`bridge/scripts/pixoo-preview.ts`) and
 removes the drift risk of the hand-mirrored Swift Device Preview ESP32 tiles.
 
 ```bash
-pnpm esp32:sim                 # all 9 boards, all scenes → esp32/sim/sim-out/
+pnpm esp32:sim                 # all 11 first-party board UIs, all scenes → esp32/sim/sim-out/
 pnpm esp32:sim box_86 working  # one board, one scene
 ```
 
@@ -35,8 +35,9 @@ Covers all board classes: LCD terrarium + HUD (`box_86` 480×480, `ips35` 480×3
 `amoled` 360×360 round, `ttgo` 135×240 compact overlay), the IPS10 tablet "pixel
 office" + sidebar mosaic (`ips10` 1280×800), the two companion render trees
 (`t_embed` 320×170 encoder knob, `t_display_pro` 480×222 focus strip), the TC001
-8×32 LED matrix (`led8x32`, usage/agents pages), and the InkDeck 1-bit e-ink
-dashboard (`inkdeck` 800×480). LCD boards render the **real** composed screen via
+8×32 LED matrix (`led8x32`, usage/agents pages), and the three paper-face layouts
+(`inkdeck` 800×480, `nm_epd_420_preview` 400×300, and
+`lilygo_epd47_preview` 960×540). LCD boards render the **real** composed screen via
 the board's own builder — `Screens::aquariumCreate()`, `Knob::create()` or
 `Ticker::create()`. Two further envs (`xteink_x3`, `xteink_x4`) are layout
 diagnostics rather than board previews: they render the AgentDeck e-ink tree at
@@ -215,7 +216,7 @@ agentdeck esp32-ota ips_10 --firmware esp32/.pio/build/ips10/firmware.bin
 agentdeck esp32-ota ips_10 --firmware agentdeck-ips_10.bin
 ```
 
-릴리스는 `docs/hardware-compatibility.md`에서 Shipping 인 보드 전체를 빌드하며(현재 10종), 보드별로 `-partitions.bin`/`-bootloader.bin`과 `SHA256SUMS.txt`를 함께 첨부한다. 릴리스 노트의 보드 표는 빌드 산출물에서 렌더링되므로 손으로 관리하는 두 번째 목록이 아니다. **Shipping 보드를 추가하면 `.github/workflows/esp32-release.yml`의 matrix 행도 같이 추가해야 한다** — 빠뜨려도 실패 없이 그 보드 펌웨어만 조용히 누락된다.
+릴리스는 `docs/hardware-compatibility.md`에서 Shipping 인 보드 전체를 빌드하며(현재 12종), 보드별로 `-partitions.bin`/`-bootloader.bin`과 `SHA256SUMS.txt`를 함께 첨부한다. 릴리스 노트의 보드 표는 빌드 산출물에서 렌더링되므로 손으로 관리하는 두 번째 목록이 아니다. 보드 행은 `shared/src/esp32-boards.ts`에서 workflow로 생성되며 `node scripts/generate-esp32-board-matrix.mjs --check`가 누락을 실패시킨다.
 
 Daemon API는 `POST /esp32/ota` 이며 CLI는 이 엔드포인트를 호출한다. OTA 프로토콜은 daemon→firmware `esp32_ota_begin`, `esp32_ota_chunk`, `esp32_ota_end`, `esp32_ota_abort`, firmware→daemon `esp32_ota_ack`, `esp32_ota_error` 로 구성된다. Firmware는 `device_info`에 OTA capability(지원 여부, OTA 슬롯 수, 최소 슬롯 크기, free sketch space, 미지원 사유)를 실어 serial/WebSocket 양쪽에 보고한다. 전송은 WiFi WS socket에서 1KB base64 chunk 단위로 진행하고, `Update` + MD5 검증 성공 후 재부팅한다.
 
@@ -226,6 +227,7 @@ OTA 대상 SSOT. **`agentdeck esp32-ota <target>`의 `<target>`은 로컬 Platfo
 | Target aliases | PlatformIO env | OTA slot size | 운영 메모 |
 |---|---|---:|---|
 | `inkdeck` | `inkdeck` | ~3.3MB | Seeed XIAO ESP32-S3 Plus BSP와 일치하도록 8MB layout 유지 |
+| **`lilygo_epd47`**, `epd47` | `lilygo_epd47` | ~6.25MB | T5 ePaper S3 N16R8; 4-bit 프레임버퍼는 PSRAM에 1회 할당 |
 | `ulanzi_tc001`, `led8x32` | `led8x32` | ~3.0MB | FastLED matrix, LVGL 미사용 |
 | **`ttgo_t_display`**, `ttgo` | `ttgo` | ~6.0MB | PSRAM 없는 classic ESP32, 작은 렌더 버퍼 유지 |
 | **`ips_35`**, `ips35` | `ips35` | ~3.5MB | FAT 포함 dual-OTA layout |
@@ -293,3 +295,6 @@ AgentDeck esp32/src/net/protocol"*). C3(no-PSRAM/ArduinoJson)에는 C++ 코드�
 | LilyGO T-Embed CC1101 (Companion Knob) | `t_embed` | 320×170 + 8-LED ring | ESP32-S3 | `/dev/cu.usbmodem2101` (Native USB) | ✅ 연결됨 |
 | LilyGO T-Display-S3-Pro (Focus Strip, 무카메라) | `t_display_pro` | 480×222 가로 (Ticker UI) | ESP32-S3 | `/dev/cu.usbmodem3111201` (Native USB) | ✅ 연결됨 |
 | LilyGO T-Display-S3-Pro (Pocket, GC0308 카메라) | `t_display_pro` | 222×480 세로 (Pocket UI) | ESP32-S3 | WiFi 상주 (부팅 시 카메라 감지 → 세로 전환) | ✅ 연결됨 |
+| Seeed TRMNL / InkDeck | `inkdeck` | 800×480 가로 | XIAO ESP32-S3 Plus | `/dev/cu.usbmodem1CDBD474F4D81` (runtime; download node 재열거) | ✅ 2026-08-30 확인 |
+| RockBase NM-EPD-420 | `nm_epd_420` | 400×300 가로 | ESP32-S3 N16R8 | `/dev/cu.usbmodem83201` (Native USB) | ✅ 2026-08-30 확인 |
+| LilyGo T5 ePaper S3 V2.4 | `lilygo_epd47` | 960×540 가로 | ESP32-S3 N16R8 | `/dev/cu.usbmodem21401` (Native USB) | ✅ 2026-08-30 확인 |

@@ -19,7 +19,16 @@ constexpr const char* WIFI_PREFS_NS = "adwifi";
 constexpr const char* WIFI_PREFS_BRIDGE_TOKEN = "bridge_token";
 }  // namespace
 
-#if defined(BOARD_IPS10) || defined(BOARD_T_DISPLAY_PRO)
+#if defined(BOARD_IPS10) || defined(BOARD_T_DISPLAY_PRO) || \
+    defined(BOARD_NM_EPD_420) || defined(BOARD_LILYGO_EPD47)
+#define AGENTDECK_PERSISTED_WIFI 1
+#endif
+
+#if defined(BOARD_IPS10) || defined(BOARD_NM_EPD_420) || defined(BOARD_LILYGO_EPD47)
+#define AGENTDECK_USB_PROVISIONED_WIFI_BOOT 1
+#endif
+
+#if defined(AGENTDECK_PERSISTED_WIFI)
 // The credential/endpoint keys owned by IPS10 (hosted C6 radio) and the
 // T-Display-S3-Pro strip (WiFi join concurrent with display bring-up tripped
 // the brownout detector on the camera unit, 2026-07-27).
@@ -77,24 +86,25 @@ void wifiInit() {
     wm.setConfigPortalTimeout(0);  // Portal stays open until configured
     wm.setTitle("AgentDeck");
 
-#if defined(BOARD_IPS10)
-    // IPS10 (ESP32-P4 + ESP32-C6 via ESP-Hosted) is serial-attached. A continuously
-    // broadcasting SoftAP config portal adds power draw + co-processor WiFi activity
-    // that can cause intermittent resets (no panic — looks like a brownout). So never
-    // start the portal here: connect to saved creds if present, otherwise turn the
-    // radio OFF. WiFi can still be provisioned later via the daemon (wifiConnectWith).
-    wm.setEnableConfigPortal(false);   // never start the SoftAP portal on IPS10
+#if defined(AGENTDECK_USB_PROVISIONED_WIFI_BOOT)
+    // USB-provisioned boards do not broadcast a captive portal. On IPS10 that
+    // avoids hosted-C6 power/reset pressure; on pull e-ink it avoids burning a
+    // battery while nobody is looking and bypasses WiFiManager's asynchronous
+    // callback race on Arduino 3. Connect saved daemon credentials if present,
+    // otherwise leave the radio off until USB provisioning.
+    wm.setEnableConfigPortal(false);
     // Cold-path stack buffers: bounded to WiFi SSID/password limits and discarded
     // before the render loop. Avoid Arduino String heap churn on IPS10 boot.
     char savedSsid[IPS10_SSID_MAX] = {0};
     char savedPassword[IPS10_PASSWORD_MAX] = {0};
     if (loadIps10ProvisionedWifi(savedSsid, sizeof(savedSsid), savedPassword, sizeof(savedPassword))) {
-        Serial.printf("[WiFi] IPS10 saved daemon credentials found: SSID=%s\n", savedSsid);
+        Serial.printf("[WiFi] Saved daemon credentials found: SSID=%s\n", savedSsid);
         if (wifiConnectWith(savedSsid, savedPassword)) {
             return;
         }
-        Serial.println("[WiFi] IPS10 saved daemon credentials failed; trying WiFiManager storage");
+        Serial.println("[WiFi] Saved daemon credentials failed");
     }
+#if defined(BOARD_IPS10)
     if (wm.autoConnect()) {            // tries saved creds only; false if none/unreachable
         IPAddress ip = WiFi.localIP();
         snprintf(ipBuf, sizeof(ipBuf), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
@@ -103,11 +113,12 @@ void wifiInit() {
         Serial.println("[WiFi] NTP sync started (UTC)");
         wifiWasConnected = true;
         portalActive = false;
-    } else {
-        Serial.println("[WiFi] No saved creds — radio OFF (no AP portal; provision via daemon)");
-        portalActive = false;
-        WiFi.mode(WIFI_OFF);
+        return;
     }
+#endif
+    Serial.println("[WiFi] No saved creds — radio OFF (no AP portal; provision via daemon)");
+    portalActive = false;
+    WiFi.mode(WIFI_OFF);
     return;
 #endif
 
@@ -167,7 +178,7 @@ bool wifiConnected() {
 
 bool wifiConfigured() {
     if (WiFi.SSID().length() > 0) return true;
-#if defined(BOARD_IPS10) || defined(BOARD_T_DISPLAY_PRO)
+#if defined(AGENTDECK_PERSISTED_WIFI)
     // Deferred-save provisions count as configured — this is what stops the
     // daemon's auto-provision from re-sending credentials every identify.
     char savedSsid[IPS10_SSID_MAX] = {0};
@@ -266,7 +277,7 @@ bool wifiConnectWith(const char* ssid, const char* password) {
         Serial.println("[WiFi] NTP sync started (UTC)");
         wifiWasConnected = true;
         portalActive = false;
-#if defined(BOARD_IPS10)
+#if defined(AGENTDECK_PERSISTED_WIFI)
         saveIps10ProvisionedWifi(ssid, password);
 #endif
         return true;
@@ -277,7 +288,7 @@ bool wifiConnectWith(const char* ssid, const char* password) {
 }
 
 void wifiSaveProvisionedCredentials(const char* ssid, const char* password) {
-#if defined(BOARD_IPS10) || defined(BOARD_T_DISPLAY_PRO)
+#if defined(AGENTDECK_PERSISTED_WIFI)
     saveIps10ProvisionedWifi(ssid, password);
 #else
     (void)ssid;
@@ -350,7 +361,7 @@ void wifiSaveProvisionedBridge(const char* ip, uint16_t port, const char* token)
     // The credential is board-agnostic even though the endpoint is not.
     wifiSaveAuthToken(token);
 
-#if defined(BOARD_IPS10) || defined(BOARD_T_DISPLAY_PRO)
+#if defined(AGENTDECK_PERSISTED_WIFI)
     if (!ip || ip[0] == '\0' || port == 0) return;
 
     Preferences prefs;
@@ -373,7 +384,7 @@ bool wifiLoadProvisionedBridge(char* ip, size_t ipLen, uint16_t* port, char* tok
     token[0] = '\0';
     *port = 0;
 
-#if defined(BOARD_IPS10) || defined(BOARD_T_DISPLAY_PRO)
+#if defined(AGENTDECK_PERSISTED_WIFI)
     Preferences prefs;
     if (!prefs.begin(WIFI_PREFS_NS, true)) return false;
     size_t ipBytes = prefs.getString(WIFI_PREFS_BRIDGE_IP, ip, ipLen);

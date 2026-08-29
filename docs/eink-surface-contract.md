@@ -26,8 +26,10 @@ does not earn a panel refresh.
 
 ## 1. Two layers
 
-- The **body** is server-authored, server-rendered pixels. Firmware does not
-  reinterpret prose or invent a new face from live event state.
+- The **body** is server-authored durable meaning. The current ESP32 renderer
+  maps structured daemon state into board-specific pixels; a daemon-rendered
+  framebuffer is also valid. Firmware may choose geometry, but it must not
+  reinterpret transient tool churn as a new face.
 - The **band** is a small on-device status line: which session may speak next,
   current transport/activity state, and an absolute `as of HH:MM` timestamp.
   `PROCESSING`, tool churn, reconnecting, and similar transients are band words,
@@ -87,6 +89,13 @@ mode.
 | InkDeck / Seeed TRMNL 7.5 | **Push**; USB-powered and continuously reachable | Not used by current firmware | None (no microphone) | `KEY2` / GPIO3 → `GLANCE`; `KEY1` remains the primary/page control |
 | RockBase NM-EPD-420 | **Pull** by default; explicit tethered configuration may promote it to push | `BOOT` / GPIO0 | `BOOT` hold, only after a wake tap has been released and audio is ready | `USER` / GPIO45 → `GLANCE`; it cannot wake the ESP32-S3 from deep sleep |
 | LilyGo T5 ePaper S3 / EPD47 | **Pull** | User button / GPIO21; `BOOT` / GPIO0 is recovery fallback. Touch IRQ GPIO47 is not a wake source without a hardware reroute. | None (no onboard microphone) | User button / GPIO21 → `GLANCE` while awake and wake-to-`GLANCE` while asleep |
+
+On pull boards, a physical primary/wake action starts the eight-minute
+interactive lease. Outside that lease, `DECISION` and `ANSWER` are ineligible;
+loss of the daemon selects the static `ROSTER` fallback. The current NM build
+reserves a fresh `BOOT` hold for PTT but does not yet enable the ES8311 capture
+driver, so the allocation is stable before the audio path lands rather than
+being borrowed for a conflicting escape action.
 
 The NM audio path is deliberately half-duplex at the product level: codec and
 speaker amplifier stay disabled during capture, then may be enabled for a short

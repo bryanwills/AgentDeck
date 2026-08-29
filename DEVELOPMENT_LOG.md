@@ -14,17 +14,42 @@ expiry, 항상 같은 escape 의미를 정본으로 고정한다. 상시 연결 
 
 실물/공식 자료 대조 결과 InkDeck은 push, RockBase NM-EPD-420과 LilyGo EPD47은
 pull 기본으로 분류했다. NM은 BOOT(GPIO0) wake/PTT와 USER(GPIO45) escape,
-EPD47은 GPIO21 wake/escape이며 온보드 오디오가 없어 PTT가 없다. USB 재점검에서는
-NM-EPD-420을 ESP32-S3R8과 factory Dashboard 이미지로 식별했고 EPD47은 아직
-열거되지 않았다.
+EPD47은 GPIO21 wake/escape이며 온보드 오디오가 없어 PTT가 없다. 세 기기의
+모델·패널/방향, MCU/PSRAM, 전원, 딥슬립 웨이크, 마이크 경로, 스피커 앰프 enable은
+`docs/hardware-compatibility.md`의 e-ink 6필드 표로 고정했다. NM의 ES8311은
+full-duplex I2S이고 PA enable은 GPIO41이지만, 이번 display-first 타깃은 오디오
+드라이버를 켜지 않아 BOOT hold를 PTT에 예약만 한다.
+
+세 보드가 이제 하나의 paper-face 렌더러를 쓴다. InkDeck은 다섯 면을 모두 상시
+허용하고, pull 보드는 GLANCE/DIGEST/ROSTER를 기본으로 하되 물리 입력 뒤 8분
+interactive lease에서만 DECISION/ANSWER를 허용한다. 오프라인은 정적 ROSTER,
+escape와 expiry는 GLANCE다. 400×300 NM은 red action rail과 10초 full-refresh
+게이트, 960×540 EPD47은 PSRAM에 259,200바이트 4-bit 버퍼를 한 번만 할당하는
+responsive layout을 사용한다. 두 보드는 captive portal 대신 USB provisioning을
+기본으로 하여 pull 전력 계약과 Arduino 3 WiFiManager callback 안정성을 함께
+지킨다.
 
 재설계 후 평가를 손재현하지 않도록 InkDeck의 실제 패널 I/O choke point에
 `repaintCount`/`fullRefreshCount` 부팅 이후 누적치를 추가했다. `device_info`의
 직렬·WiFi 경로를 Node/Swift 양 데몬에서 보존해 `/devices`와 module health로
 노출하며, 요청됐으나 gating에서 버려진 render는 세지 않는다.
 
-검증: vitest 3,713건, Node typecheck, Swift `ESP32WifiForwardTests`, InkDeck
-PlatformIO release 빌드, 문서 링크/H1 및 design-system catalog coverage 게이트.
+실기 배포 전에 LilyGo와 NM의 16MB factory flash를 각각 완전 백업하고 SHA-256을
+검증했다. 이후 LilyGo(`/dev/cu.usbmodem21401`, MAC a4:cb:8f:ef:7a:bc),
+NM(`/dev/cu.usbmodem83201`, MAC 68:ee:8f:5b:bc:a8), InkDeck(다운로드 노드
+`/dev/cu.usbmodem3111101`, MAC 1c:db:d4:74:f4:d8)에 순차 플래시했다. 부팅 실측은
+각각 16MB/8MB, 16MB/8MB, BSP 8MB/8MB이며, 세 `device_info` 모두 새 board id와
+refresh counters를 보고했다. NM은 단일 3MB app이라 OTA false, EPD47은 6.25MB
+dual OTA, InkDeck은 3.19MB dual OTA다.
+
+EPD47의 custom board와 최종 이미지 header는 flash DIO가 정본이다. 동일 app을
+강제로 QIO write했을 때 TG0WDT reset loop가 재현됐고 DIO로 다시 쓰자 즉시 안정
+부팅했다. PlatformIO의 `qio_opi` memory type은 octal PSRAM 배선을 뜻하며 flash
+transport를 QIO로 바꾸라는 의미가 아니다.
+
+검증: vitest 3,713건, Node typecheck, Swift `ESP32WifiForwardTests`, 세 e-ink
+PlatformIO release 빌드/실기 부팅, 11개 first-party host simulator frame,
+문서 링크/H1 및 design-system catalog coverage 게이트.
 
 ## 2026-08-29 — Work 판이 두 데몬 모두에서 서빙되고, 태스크 이름 규칙은 생성 미러가 된다
 

@@ -17,6 +17,7 @@ Usage:
 
 Environments (canonical friendly name — panel/form + inches):
   ips_35 | amoled_18 | box_40 | tft_114 | ips_101 | inkdeck
+  nm_epd_420 | lilygo_epd47
   t_embed | t_display_pro | led_8x32
   (legacy aliases still accepted: round_amoled, box_86, knob, ticker, ...)
 
@@ -90,6 +91,8 @@ map_env_to_pio() {
         tft_114|ttgo_t_display|ttgo) echo "ttgo" ;;
         ips_101|ips_10|ips10) echo "ips10" ;;
         inkdeck) echo "inkdeck" ;;
+        nm_epd_420) echo "nm_epd_420" ;;
+        lilygo_epd47|epd47) echo "lilygo_epd47" ;;
         t_embed|tembed|knob) echo "t_embed" ;;
         t_display_pro|tdisplaypro|ticker|s3pro|focus_strip) echo "t_display_pro" ;;
         *) echo "$1" ;;
@@ -104,7 +107,7 @@ validate_env() {
         led_8x32|ulanzi_tc001|led8x32|\
         tft_114|ttgo_t_display|ttgo|\
         ips_101|ips_10|ips10|\
-        inkdeck|\
+        inkdeck|nm_epd_420|lilygo_epd47|epd47|\
         t_embed|tembed|knob|\
         t_display_pro|tdisplaypro|ticker|s3pro|focus_strip) ;;
         *)
@@ -128,6 +131,8 @@ If this is a Native USB display board in recovery mode:
      $0 amoled_18 $1
      $0 t_embed $1
      $0 t_display_pro $1
+     $0 nm_epd_420 $1
+     $0 lilygo_epd47 $1
 
 Do not guess a board model from the usbmodem number alone.
 EOF

@@ -3,7 +3,7 @@
 Render **real** AgentDeck ESP32 board screens on your Mac/Linux host — no board,
 no flashing. The simulator compiles the firmware's render surfaces (LVGL
 terrarium + HUD, the "pixel office" tablet layout, the TC001 LED matrix, and the
-InkDeck e-ink dashboard) against a host toolchain, into an in-memory framebuffer
+the shared e-ink paper faces) against a host toolchain, into an in-memory framebuffer
 that is dumped to PNG.
 
 Because it reuses the firmware sources **verbatim** with each board's build
@@ -51,12 +51,18 @@ pio run -e box_86                                       # build the host binary
 | `t_display_pro` | `BOARD_T_DISPLAY_PRO` | 480×222 | T-Display-S3-Pro — "Focus Strip" (`ui/ticker/`), camera-less unit |
 | `led8x32` | `BOARD_LED8X32` | 8×32 (×16) | Ulanzi TC001 WS2812B matrix — usage/agents pages   |
 | `inkdeck` | `BOARD_INKDECK` | 800×480    | Seeed InkDeck 1-bit e-ink dashboard (UC8179)       |
+| `nm_epd_420_preview` | `BOARD_SIM_PULL` | 400×300 | RockBase pull-face UI at physical panel size |
+| `lilygo_epd47_preview` | `BOARD_SIM_PULL` | 960×540 | LilyGo EPD47 pull-face UI at physical panel size |
 
 The LCD boards render the **real composed screen** via each board's own render
 tree — `Screens::aquariumCreate()` (Terrarium+HUD / Office / TTGO overlay),
 `Knob::create()` or `Ticker::create()` — not a hand-assembled approximation. The
 matrix (`--page usage|agents`, upscaled ×16) and e-ink are LVGL-free and use
 their own render paths.
+
+The two `_preview` envs compile the exact shared face renderer and responsive
+geometry at the production panel sizes; only the hardware panel backend is
+shimmed. They are first-party UI previews and are included in `render.sh`.
 
 ### Layout-diagnostic envs (not published)
 

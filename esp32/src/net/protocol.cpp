@@ -40,7 +40,7 @@
 #if defined(BOARD_IPS10)
 #include "../ui/display.h"         // UI::hwI2cProbe — audio-codec hardware probe
 #endif
-#if defined(BOARD_INKDECK)
+#if defined(BOARD_EINK_SURFACE)
 #include "../ui/eink/eink_display.h"
 #endif
 #if defined(BOARD_SPK_CODEC_ES8311)
@@ -1135,7 +1135,7 @@ static void sendDeviceInfo() {
             if (strcmp(g_state.sessions[i].state, "processing") == 0) processing++;
         resp["processingCount"] = processing;
     }
-#if defined(BOARD_INKDECK)
+#if defined(BOARD_EINK_SURFACE)
     // Physical panel I/O since boot. These deliberately count inside the
     // e-ink refresh choke point, after content/rate gating has admitted a draw.
     resp["repaintCount"] = Eink::repaintCount();

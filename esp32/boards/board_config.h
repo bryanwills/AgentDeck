@@ -17,6 +17,10 @@
     #include "board_esp32_c6_147.h"
 #elif defined(BOARD_IPS10) || defined(BOARD_JC8012P4A1C)
     #include "board_jc8012p4a1c.h"
+#elif defined(BOARD_NM_EPD_420)
+    #include "board_nm_epd_420.h"
+#elif defined(BOARD_LILYGO_EPD47)
+    #include "board_lilygo_epd47.h"
 #elif defined(BOARD_INKDECK)
     #include "board_inkdeck.h"
 #elif defined(BOARD_T_EMBED)
@@ -42,6 +46,10 @@
 inline const char* agentdeckBoardName() {
     #if defined(BOARD_LED8X32) || defined(BOARD_ULANZI_TC001)
         return "ulanzi_tc001";
+    #elif defined(BOARD_NM_EPD_420)
+        return "nm_epd_420";
+    #elif defined(BOARD_LILYGO_EPD47)
+        return "lilygo_epd47";
     #elif defined(BOARD_INKDECK)
         return "inkdeck";
     #elif defined(BOARD_TTGO) || defined(BOARD_TTGO_T_DISPLAY)
