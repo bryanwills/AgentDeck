@@ -53,11 +53,27 @@ describe('generated APME display-rule mirrors in sync', () => {
   });
 });
 
-describe('ApmeCollector.swift still mirrors the idle-gap constant', () => {
+describe('Swift daemon still mirrors the hand-pinned APME constants', () => {
   it('idle-gap boundary matches AGENT_IDLE_GAP_MS (Swift keeps seconds)', async () => {
     const { AGENT_IDLE_GAP_MS } = await import('../eval-schema.js');
     const swift = readFileSync(
       `${repoRoot}apple/AgentDeck/Daemon/Apme/ApmeCollector.swift`, 'utf8');
     expect(swift).toContain(`var idleGapSec: TimeInterval = ${AGENT_IDLE_GAP_MS / 1000}`);
+  });
+
+  // The Work-board attention bucket is a cross-daemon contract: the same
+  // task must land in the same bucket whichever daemon owns port 9120. The
+  // SQL text lives per-side (SQLite dialects match, drivers differ), so the
+  // NUMBERS are pinned here against the shared SSOT the Node store imports.
+  it('attention window and red band match the eval-schema SSOT', async () => {
+    const { TASK_ATTENTION_WINDOW_MS, TASK_ATTENTION_RED_SCORE } =
+      await import('../eval-schema.js');
+    const swift = readFileSync(
+      `${repoRoot}apple/AgentDeck/Daemon/Apme/ApmeStore.swift`, 'utf8');
+    expect(TASK_ATTENTION_WINDOW_MS).toBe(7 * 24 * 60 * 60 * 1000);
+    expect(swift).toContain('static let taskAttentionWindowMs = 7 * 24 * 60 * 60 * 1000');
+    expect(swift).toContain(`static let taskAttentionRedScore = ${TASK_ATTENTION_RED_SCORE}`);
+    // The `_empty` bookkeeping-shell filter must exist on both sides too.
+    expect(swift).toContain(`!= '_empty'`);
   });
 });

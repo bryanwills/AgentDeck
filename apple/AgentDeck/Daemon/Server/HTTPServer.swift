@@ -345,10 +345,22 @@ actor HTTPServer {
         let path = String(pathComponents[0])
         var queryParams: [String: String] = [:]
         if pathComponents.count > 1 {
+            // application/x-www-form-urlencoded decoding, matching what
+            // URLSearchParams (the dashboard) and Node's url.searchParams
+            // produce/consume: '+' is a space, then percent-escapes decode.
+            // Without this, a Work-board search for "fix bug" ran
+            // `LIKE '%fix+bug%'` on this daemon and matched nothing, and any
+            // Korean query arrived as raw %EC%9E… bytes — the same request
+            // Node answered correctly. A malformed escape keeps the raw
+            // string rather than dropping the parameter.
+            func formDecode(_ s: Substring) -> String {
+                let plusDecoded = s.replacingOccurrences(of: "+", with: " ")
+                return plusDecoded.removingPercentEncoding ?? plusDecoded
+            }
             for param in pathComponents[1].split(separator: "&") {
                 let kv = param.split(separator: "=", maxSplits: 1)
                 if kv.count == 2 {
-                    queryParams[String(kv[0])] = String(kv[1])
+                    queryParams[formDecode(kv[0])] = formDecode(kv[1])
                 }
             }
         }

@@ -14,7 +14,26 @@ export function apmeDashboardHtml(): string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AgentDeck — Agent Performance Monitoring & Evaluation</title>
 <style>
-:root{--bg:#0f172a;--surface:#1e293b;--border:#334155;--text:#e2e8f0;--muted:#94a3b8;--dim:#64748b;--green:#22c55e;--yellow:#f59e0b;--red:#ef4444;--blue:#3b82f6;--accent:#818cf8}
+/* Palette derived from design/tokens.css. The dashboard ships as one
+ * self-contained HTML string (WKWebView loads the bundled copy via the
+ * in-process daemon), so the canonical CSS file can't be <link>'d: the
+ * :root primitives below are a manual mirror of design/tokens.css §2,
+ * gated by design/verify-tokens-sync.py against the bundled resource —
+ * which is byte-identical to this renderer's output. Everything below
+ * :root references var(--…) only; the checker flags any stray hex. */
+:root{
+/* === Design system primitives (mirrors design/tokens.css §2) === */
+--ink-800:#15302f;--ink-700:#1f4544;--ink-500:#426664;--ink-300:#7c9694;
+--kelp-500:#2f8a7c;--kelp-300:#6fb6a8;
+--coral-500:#c0573a;--amber-500:#c8923a;
+--ui-ok:#52D988;--ui-attn:#FFA93D;--ui-error:#FF6B6B;--ui-cyan:#3ED6E8;
+--ui-idle-dark:#7a8a9c;--ui-popup-bg-dark:#0a1a2a;--ui-tty-text:#c8d0d8;
+/* === Dashboard-local semantic aliases === */
+--bg:var(--ui-popup-bg-dark);--surface:var(--ink-800);--border:var(--ink-700);
+--text:var(--ui-tty-text);--muted:var(--ui-idle-dark);--dim:var(--ink-500);
+--green:var(--ui-ok);--yellow:var(--ui-attn);--red:var(--ui-error);--blue:var(--ui-cyan);
+--accent:var(--kelp-500);--amber:var(--amber-500);--orange:var(--ui-attn)
+}
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;font-size:13px;height:100vh;overflow:hidden}
 
@@ -40,10 +59,10 @@ header .status{margin-left:auto;font-size:11px;color:var(--dim)}
 .table-wrap{flex:1;overflow-y:auto}
 table{width:100%;border-collapse:collapse;font-size:12px}
 th{position:sticky;top:0;text-align:left;color:var(--dim);font-weight:500;padding:8px 10px;background:var(--surface);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase;letter-spacing:0.3px}
-td{padding:7px 10px;border-bottom:1px solid rgba(51,65,85,0.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
+td{padding:7px 10px;border-bottom:1px solid color-mix(in srgb,var(--border) 50%,transparent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
 tr{cursor:pointer;transition:background 0.1s}
-tr:hover td{background:rgba(30,42,59,0.8)}
-tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--accent)}
+tr:hover td{background:color-mix(in srgb,var(--surface) 80%,transparent)}
+tr.selected td{background:color-mix(in srgb,var(--accent) 15%,transparent);border-left:2px solid var(--accent)}
 .task-col{max-width:250px;color:var(--muted);font-style:italic}
 
 /* ── Scores / badges ── */
@@ -53,12 +72,12 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
 .score-low{color:var(--red)}
 .score-na{color:var(--dim)}
 .badge{font-size:10px;padding:2px 8px;border-radius:10px;font-weight:600;display:inline-block}
-.badge-committed{background:#166534;color:#bbf7d0}
-.badge-abandoned{background:#7f1d1d;color:#fecaca}
-.badge-iterated{background:#78350f;color:#fef3c7}
+.badge-committed{background:color-mix(in srgb,var(--green) 18%,var(--bg));color:var(--green)}
+.badge-abandoned{background:color-mix(in srgb,var(--red) 18%,var(--bg));color:var(--red)}
+.badge-iterated{background:color-mix(in srgb,var(--yellow) 18%,var(--bg));color:var(--yellow)}
 .badge-exploratory{background:var(--surface);color:var(--muted);border:1px solid var(--border)}
 .badge-pending{background:var(--surface);color:var(--dim)}
-.badge-cat{background:var(--surface);color:var(--accent);border:1px solid rgba(129,140,248,0.3);font-size:10px;padding:1px 6px;border-radius:4px}
+.badge-cat{background:var(--surface);color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);font-size:10px;padding:1px 6px;border-radius:4px}
 
 /* ── Detail panel ── */
 .detail-empty{display:flex;align-items:center;justify-content:center;height:100%;color:var(--dim);font-size:14px}
@@ -94,8 +113,8 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
 .vibe-bar{display:flex;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--border)}
 .vibe-btn{padding:8px 20px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.15s}
 .vibe-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,0.3)}
-.vibe-approve{background:#166534;color:#bbf7d0}
-.vibe-reject{background:#7f1d1d;color:#fecaca}
+.vibe-approve{background:color-mix(in srgb,var(--green) 22%,var(--bg));color:var(--green)}
+.vibe-reject{background:color-mix(in srgb,var(--red) 22%,var(--bg));color:var(--red)}
 .vibe-current{font-size:11px;color:var(--dim);display:flex;align-items:center;margin-left:8px}
 
 .panel{display:none}.panel.visible{display:block;height:100%}
@@ -104,20 +123,20 @@ tr.selected td{background:rgba(99,102,241,0.15);border-left:2px solid var(--acce
 .work-tabs{display:flex;gap:4px;padding:8px 10px;background:var(--surface);border-bottom:1px solid var(--border);flex-wrap:wrap;align-items:center}
 .work-tab{padding:3px 10px;border-radius:10px;font-size:11px;color:var(--dim);cursor:pointer;border:1px solid transparent;background:none}
 .work-tab:hover{color:var(--muted)}
-.work-tab.active{background:rgba(129,140,248,0.15);color:var(--accent);border-color:rgba(129,140,248,0.3)}
+.work-tab.active{background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent);border-color:color-mix(in srgb,var(--accent) 30%,transparent)}
 .work-tab .n{opacity:0.75;margin-left:3px;font-variant-numeric:tabular-nums}
-.work-row{padding:9px 12px;border-bottom:1px solid rgba(51,65,85,0.5);cursor:pointer}
-.work-row:hover{background:rgba(30,42,59,0.8)}
-.work-row.selected{background:rgba(99,102,241,0.15)}
+.work-row{padding:9px 12px;border-bottom:1px solid color-mix(in srgb,var(--border) 50%,transparent);cursor:pointer}
+.work-row:hover{background:color-mix(in srgb,var(--surface) 80%,transparent)}
+.work-row.selected{background:color-mix(in srgb,var(--accent) 15%,transparent)}
 .work-row.attn{box-shadow:inset 3px 0 0 var(--yellow)}
 .work-title{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text);font-weight:600;min-width:0}
 .work-title .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
 .work-title .t.unnamed{color:var(--muted);font-weight:500;font-style:italic}
 .work-sub{display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:10.5px;color:var(--dim);margin-top:3px;font-variant-numeric:tabular-nums}
 .chip{font-size:10px;padding:1px 7px;border-radius:9px;background:var(--surface);color:var(--muted);border:1px solid var(--border);white-space:nowrap}
-.chip-ok{background:rgba(34,197,94,0.12);color:var(--green);border-color:rgba(34,197,94,0.3)}
-.chip-warn{background:rgba(245,158,11,0.12);color:var(--yellow);border-color:rgba(245,158,11,0.3)}
-.chip-bad{background:rgba(239,68,68,0.12);color:var(--red);border-color:rgba(239,68,68,0.3)}
+.chip-ok{background:color-mix(in srgb,var(--green) 12%,transparent);color:var(--green);border-color:color-mix(in srgb,var(--green) 30%,transparent)}
+.chip-warn{background:color-mix(in srgb,var(--yellow) 12%,transparent);color:var(--yellow);border-color:color-mix(in srgb,var(--yellow) 30%,transparent)}
+.chip-bad{background:color-mix(in srgb,var(--red) 12%,transparent);color:var(--red);border-color:color-mix(in srgb,var(--red) 30%,transparent)}
 /* Graph needs a column flex box so the canvas can claim the leftover height. */
 .panel#panel-graph.visible{display:flex;flex-direction:column}
 .activity-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;padding:10px;background:var(--surface);border-bottom:1px solid var(--border)}
@@ -390,7 +409,7 @@ async function selectRun(id){
 
     // Active session notice
     if(!endedAt){
-      h+='<div class="section" style="padding:10px 12px;background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);border-radius:6px;color:var(--blue);font-size:12px">⏳ Session active — score, category, and outcome appear after the session ends.</div>';
+      h+='<div class="section" style="padding:10px 12px;background:color-mix(in srgb,var(--blue) 15%,transparent);border:1px solid color-mix(in srgb,var(--blue) 30%,transparent);border-radius:6px;color:var(--blue);font-size:12px">⏳ Session active — score, category, and outcome appear after the session ends.</div>';
     }else{
       // Completed but un-scored: no composite, no LLM/task/turn judge, no
       // deterministic, no manual review. Without this, the panel reads as a
@@ -400,7 +419,7 @@ async function selectRun(id){
       const scored=compScore!=null||evals.length>0;
       if(!scored){
         const reason=layer1Skipped?('deterministic checks skipped ('+esc(layer1Skipped)+') and no LLM judge ran'):'no evaluation ran for this task';
-        h+='<div class="section" style="padding:10px 12px;background:rgba(148,163,184,0.12);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--muted);line-height:1.5">🔍 Not evaluated — '+reason+'.<br>Turn on a judge (Anthropic API, OpenClaw, local MLX 8B+, or Apple Intelligence) in <code>apme.judge</code> to score future tasks. Tasks without a judge still record their trajectory, cost, and outcome — they just carry no quality score.</div>';
+        h+='<div class="section" style="padding:10px 12px;background:color-mix(in srgb,var(--muted) 12%,transparent);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--muted);line-height:1.5">🔍 Not evaluated — '+reason+'.<br>Turn on a judge (Anthropic API, OpenClaw, local MLX 8B+, or Apple Intelligence) in <code>apme.judge</code> to score future tasks. Tasks without a judge still record their trajectory, cost, and outcome — they just carry no quality score.</div>';
       }
     }
 
@@ -427,7 +446,7 @@ async function selectRun(id){
       h+='<div class="section"><div class="section-head"><span>Manual Reviews <span style="font-size:10px;color:var(--dim);border:1px solid var(--dim);border-radius:8px;padding:1px 6px;margin-left:6px">hand-run</span></span><span style="font-size:11px;color:var(--dim)">'+mEvals.length+'</span></div>';
       for(const e of mEvals){
         const risk=e.score>=1?'low':e.score>=0.5?'medium':'high';
-        const rc=risk==='high'?'var(--red)':risk==='medium'?'var(--amber,#d19a3a)':'var(--green)';
+        const rc=risk==='high'?'var(--red)':risk==='medium'?'var(--amber)':'var(--green)';
         let summary='',findings=0;
         if(e.raw){try{const r=JSON.parse(e.raw);summary=r.summary||'';findings=(r.findings||[]).length;}catch{}}
         h+='<div style="padding:6px 0;border-bottom:1px solid var(--border,rgba(255,255,255,.06))">';
@@ -511,7 +530,7 @@ async function selectRun(id){
         if(cscore!=null)h+=fs(cscore);else h+='<span style="font-size:11px;color:var(--dim)">…</span>';
         h+='</div>';
         const ocGlyph=oc==='success'?'✓':oc==='partial'?'△':oc==='fail'?'✗':oc==='abandoned'?'⊘':'';
-        const ocColor=oc==='success'?'var(--green)':oc==='fail'?'var(--red)':oc==='partial'?'var(--orange,#f59e0b)':oc==='abandoned'?'var(--dim)':'var(--dim)';
+        const ocColor=oc==='success'?'var(--green)':oc==='fail'?'var(--red)':oc==='partial'?'var(--orange)':oc==='abandoned'?'var(--dim)':'var(--dim)';
         if(cat||oc)h+='<div style="margin-top:4px">'+(cat?'<span class="badge-cat">'+cat+'</span>':'')+(oc?' <span style="font-size:11px;color:'+ocColor+';margin-left:6px">'+ocGlyph+' '+oc+'</span>':'')+'</div>';
         if(summary)h+='<div style="color:var(--muted);font-size:12px;margin:6px 0 0;padding:6px 8px;background:var(--bg);border-radius:4px;border-left:2px solid var(--accent)">'+esc(summary.slice(0,500))+'</div>';
         h+='</div>';
@@ -596,7 +615,7 @@ async function loadTasks(offset){
     if(!tasks.length){body.innerHTML='<tr><td colspan="9" class="empty">No tasks match</td></tr>';document.getElementById('tasks-pager').textContent='';return}
     let h='';
     for(const t of tasks){
-      const label=t.summary||t.firstPrompt||('Task '+t.taskIndex);
+      const label=t.summary||t.firstPrompt||('Task '+(t.taskIndex+1));
       // A unit whose replies were never archived can only be partly judged —
       // say so on the row instead of letting a blank score read as "not run".
       const gap=t.turnCount>t.answeredTurns
@@ -711,7 +730,7 @@ async function loadWork(offset){
           sigChip(open?'open':t.boundarySignal)+
           '<span class="chip">'+esc(t.agentType||'—')+'</span>'+
           (t.taskCategory?'<span class="badge-cat">'+esc(t.taskCategory)+'</span>':'')+
-          (t.coordination?'<span class="chip" title="subagent dispatches / agent-to-agent messages" style="color:var(--accent);border-color:rgba(129,140,248,0.3)">'+
+          (t.coordination?'<span class="chip" title="subagent dispatches / agent-to-agent messages" style="color:var(--accent);border-color:color-mix(in srgb,var(--accent) 30%,transparent)">'+
             (t.coordination.dispatches?'⑂×'+t.coordination.dispatches:'')+
             (t.coordination.dispatches&&t.coordination.messages?' ':'')+
             (t.coordination.messages?'✉×'+t.coordination.messages:'')+'</span>':'')+
@@ -841,7 +860,7 @@ async function loadRecommend(){
       h+='<table style="margin-top:4px"><thead><tr><th>Agent</th><th>Model</th><th>Quality</th><th>$/Quality</th><th>Cost</th><th>Samples</th></tr></thead><tbody>';
       for(const s of list){
         const isBest=s===best;
-        h+='<tr'+(isBest?' style="background:rgba(34,197,94,0.08)"':'')+'><td>'+(isBest?'★ ':'')+esc(s.agentType||'—')+'</td><td>'+esc((s.modelId||'—').slice(0,22))+'</td><td>'+fs(s.avgQuality)+'</td><td>'+(s.costPerQuality!=null?'$'+s.costPerQuality.toFixed(3):'—')+'</td><td>'+(s.totalCost!=null?'$'+s.totalCost.toFixed(2):'—')+'</td><td>'+s.samples+'</td></tr>';
+        h+='<tr'+(isBest?' style="background:color-mix(in srgb,var(--green) 8%,transparent)"':'')+'><td>'+(isBest?'★ ':'')+esc(s.agentType||'—')+'</td><td>'+esc((s.modelId||'—').slice(0,22))+'</td><td>'+fs(s.avgQuality)+'</td><td>'+(s.costPerQuality!=null?'$'+s.costPerQuality.toFixed(3):'—')+'</td><td>'+(s.totalCost!=null?'$'+s.totalCost.toFixed(2):'—')+'</td><td>'+s.samples+'</td></tr>';
       }
       h+='</tbody></table></div>';
     }
@@ -857,7 +876,11 @@ async function loadRecommend(){
 
    Colour is by node kind; radius by degree, so the derived hubs (a file many
    tasks touched, a tool used everywhere) are the ones that read as structural. */
-const G_COLORS={run:'#6166E0',task:'#22c55e',turn:'#64748b',session:'#eab308',project:'#06b6d4',model:'#a855f7',agent:'#C07058',tool:'#f97316',file:'#94a3b8'};
+// Canvas 2D can't resolve var() at draw time, so node colors are read off
+// :root once — every value is a design token, keeping the file hex-free
+// outside the :root mirror (design/verify-tokens-sync.py).
+const cssTok=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const G_COLORS={run:cssTok('--ui-cyan'),task:cssTok('--ui-ok'),turn:cssTok('--ui-idle-dark'),session:cssTok('--amber-500'),project:cssTok('--kelp-300'),model:cssTok('--kelp-500'),agent:cssTok('--coral-500'),tool:cssTok('--ui-attn'),file:cssTok('--ink-300')};
 const G_EDGE={contains:'rgba(148,163,184,0.35)',continues:'rgba(97,102,224,0.75)',produced:'rgba(234,179,8,0.30)',used:'rgba(249,115,22,0.30)',touched:'rgba(148,163,184,0.25)'};
 
 async function loadGraph(){
@@ -970,12 +993,12 @@ function startGraphSim(nodes,edges){
       ctx.beginPath();ctx.moveTo(l.s.x,l.s.y);ctx.lineTo(l.t.x,l.t.y);ctx.stroke();
     }
     for(const n of nodes){
-      ctx.fillStyle=G_COLORS[n.kind]||'#94a3b8';
+      ctx.fillStyle=G_COLORS[n.kind]||G_COLORS.file;
       ctx.globalAlpha=hover&&hover!==n?0.55:1;
       ctx.beginPath();ctx.arc(n.x,n.y,n.r,0,6.2832);ctx.fill();
       // Label only what carries the structure, else the canvas is unreadable.
       if(n.r>7||n===hover){
-        ctx.globalAlpha=1;ctx.fillStyle='#cbd5e1';ctx.font='10px ui-monospace,monospace';
+        ctx.globalAlpha=1;ctx.fillStyle=cssTok('--ui-tty-text');ctx.font='10px ui-monospace,monospace';
         ctx.fillText(String(n.label||'').slice(0,26),n.x+n.r+3,n.y+3);
       }
       ctx.globalAlpha=1;

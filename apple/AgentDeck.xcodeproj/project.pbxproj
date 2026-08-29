@@ -318,7 +318,9 @@
 		A0E4BE7512FF07BD0DFDB2E0 /* LocalCodexAppObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 118F64508CC1FE2827516440 /* LocalCodexAppObserver.swift */; };
 		A12AD232C2625E0919A0CFDF /* ProjectNameResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDF6D4E03A73AA83A363FA94 /* ProjectNameResolverTests.swift */; };
 		A14FF06EAC0C5B5CCFC81875 /* DaemonTimelineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE17EFB01F43FCB1A53F644D /* DaemonTimelineStore.swift */; };
+		A15E15C108F9BF9818F00B0C /* HTTPServerParseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DFA860CDF8678DDE9A40D9D /* HTTPServerParseTests.swift */; };
 		A1D061096206EB863B801727 /* CodexOtelRoutes.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDB6B378D92D82E58DA5E925 /* CodexOtelRoutes.swift */; };
+		A2577EBA157934CBC4EC928B /* HTTPServerParseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DFA860CDF8678DDE9A40D9D /* HTTPServerParseTests.swift */; };
 		A2D382D31BFCC8EAEE6F19F4 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86E42A4F5681EFB215B43645 /* AppPreferences.swift */; };
 		A320BAAC52861E8F41588F75 /* ApmeOutcome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51DB3C4DCB23D09CFA856786 /* ApmeOutcome.swift */; };
 		A50EA56C00F6A51F498DD20E /* MonitorScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7B4E454713DFE2DECC4D154 /* MonitorScreen.swift */; };
@@ -591,6 +593,7 @@
 		3B886C1F467A011D242E296E /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		3C6D9385857E3BEB95A91496 /* HTTPServerMainThreadStallTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPServerMainThreadStallTests.swift; sourceTree = "<group>"; };
 		3D3815BC9679F080521D52D2 /* IDotMatrixModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IDotMatrixModule.swift; sourceTree = "<group>"; };
+		3DFA860CDF8678DDE9A40D9D /* HTTPServerParseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTTPServerParseTests.swift; sourceTree = "<group>"; };
 		3E868DDC13347FD992B9AF3D /* PairingCredential.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingCredential.swift; sourceTree = "<group>"; };
 		3FD30721AD4CBA74DD049A1F /* CrayfishCreature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrayfishCreature.swift; sourceTree = "<group>"; };
 		403CDDF7DDFCF5D8702491EA /* TerrariumConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerrariumConfig.swift; sourceTree = "<group>"; };
@@ -876,6 +879,7 @@
 				165E4184E24C198326D600A6 /* HookIdleTTLTests.swift */,
 				D805A12FAC706136018710BC /* HttpAccessPolicyTests.swift */,
 				3C6D9385857E3BEB95A91496 /* HTTPServerMainThreadStallTests.swift */,
+				3DFA860CDF8678DDE9A40D9D /* HTTPServerParseTests.swift */,
 				640AC95BED93D142107D828E /* IDotMatrixProtocolTests.swift */,
 				8B49DE4157BFB50F9F51EF40 /* LocalKiroObserverTests.swift */,
 				E0DF2FF90EE46351B4FC2F59 /* MenuBarDensityPolicyTests.swift */,
@@ -1564,6 +1568,7 @@
 				AECF975059EA0A725DB1A3E7 /* ESP32WifiForwardTests.swift in Sources */,
 				D369DAE31A2E86FD08922453 /* GatewayParityTests.swift in Sources */,
 				136F28B1F6B5E4729ADA92EC /* HTTPServerMainThreadStallTests.swift in Sources */,
+				A2577EBA157934CBC4EC928B /* HTTPServerParseTests.swift in Sources */,
 				C13B92B69ACA5F6CA1D8EE1E /* HookIdleTTLTests.swift in Sources */,
 				A78A1918B0FC99BAA4B1F6E9 /* HttpAccessPolicyTests.swift in Sources */,
 				89C78B3EB58A06C87CC5CDE0 /* IDotMatrixProtocolTests.swift in Sources */,
@@ -1621,6 +1626,7 @@
 				5E3FCF09BE50281AE6749762 /* ESP32WifiForwardTests.swift in Sources */,
 				5E39A0DA9E8B9E175292E84D /* GatewayParityTests.swift in Sources */,
 				DDB79DF8FFBAF3367C0399EF /* HTTPServerMainThreadStallTests.swift in Sources */,
+				A15E15C108F9BF9818F00B0C /* HTTPServerParseTests.swift in Sources */,
 				D5B04048B117D3FA74BE4769 /* HookIdleTTLTests.swift in Sources */,
 				CD8B866925EF6BC839EC467D /* HttpAccessPolicyTests.swift in Sources */,
 				FDE24F470C55939E9503C810 /* IDotMatrixProtocolTests.swift in Sources */,

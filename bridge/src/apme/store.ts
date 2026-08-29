@@ -37,6 +37,7 @@ import type {
   SampleModelConfig,
   TrajectoryEvent,
 } from '@agentdeck/shared';
+import { TASK_ATTENTION_WINDOW_MS, TASK_ATTENTION_RED_SCORE } from '@agentdeck/shared';
 
 // ─── Schema ────────────────────────────────────────────────────────────────────
 
@@ -582,12 +583,11 @@ const TASK_SCORE_SQL =
   `COALESCE((SELECT e.score FROM evals e WHERE e.task_id = t.id AND e.metric = 'overall'
              ORDER BY e.created_at DESC LIMIT 1), t.composite_score)`;
 
-/** Attention is triage, so it is bounded by recency: measured on the real
- *  store (2026-08-28), an unwindowed bucket held 1,412 of 1,519 tasks — the
- *  entire pre-idle-gap orphan history plus the response-capture-gap era —
- *  which is an archive, not a to-do list. Older debt stays countable and
- *  reachable through the unwindowed `orphaned`/`reported` buckets. */
-export const TASK_ATTENTION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/** The recency window and red-score band live in shared/src/eval-schema.ts
+ *  (TASK_ATTENTION_WINDOW_MS / TASK_ATTENTION_RED_SCORE): both daemons build
+ *  the same attention SQL, so the numbers are cross-daemon contracts, not
+ *  store-local tuning knobs. Re-exported for existing importers. */
+export { TASK_ATTENTION_WINDOW_MS } from '@agentdeck/shared';
 
 /** The attention bucket, anchored at a caller-supplied cutoff (epoch ms) so
  *  the filter, the row flag and the badge are computed against the SAME
@@ -604,7 +604,7 @@ function taskAttentionSql(cutoffMs: number): string {
       AND (t.boundary_signal = 'orphaned'
         OR (t.ended_at IS NOT NULL AND EXISTS (
               SELECT 1 FROM turns tu WHERE tu.task_id = t.id AND tu.response IS NULL))
-        OR ${TASK_SCORE_SQL} < 0.4)), 0)`;
+        OR ${TASK_SCORE_SQL} < ${TASK_ATTENTION_RED_SCORE})), 0)`;
 }
 
 /** The NARROWING filters `listTaskPage` and `taskViewCounts` share — one

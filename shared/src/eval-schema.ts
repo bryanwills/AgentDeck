@@ -416,6 +416,19 @@ export interface ApmeTaskListRow extends ApmeTaskRow {
  *  open; 10% ever judged). */
 export const AGENT_IDLE_GAP_MS = 900_000;
 
+/** Attention is triage, so it is bounded by recency: measured on the real
+ *  store (2026-08-28), an unwindowed bucket held 1,412 of 1,519 tasks — the
+ *  entire pre-idle-gap orphan history — which is an archive, not a to-do
+ *  list. Both daemons build the same attention SQL from this window (Swift's
+ *  `ApmeStore.taskAttentionWindowMs` literal is grep-pinned to this value by
+ *  apme-display-rules-sync.test.ts; change the two together). */
+export const TASK_ATTENTION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** The judged-score red band that pulls a recent task into the attention
+ *  bucket (`overall < this`). Same cross-daemon contract and grep gate as
+ *  the window above (Swift: `ApmeStore.taskAttentionRedScore`). */
+export const TASK_ATTENTION_RED_SCORE = 0.4;
+
 /** Work-board lifecycle buckets. `attention` is a cross-cutting triage bucket;
  *  the other four partition a task's lifecycle. One SQL definition per bucket
  *  lives in the store (`TASK_VIEW_SQL`) — filter, row flag and tab badge all

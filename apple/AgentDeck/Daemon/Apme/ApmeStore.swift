@@ -606,9 +606,15 @@ final class ApmeStore: @unchecked Sendable {
     // same Work board off the same sqlite layout.
 
     /// Attention is triage, so it is bounded by recency — see
-    /// TASK_ATTENTION_WINDOW_MS in bridge/src/apme/store.ts for the measured
-    /// rationale (an unwindowed bucket held 93% of all history).
+    /// TASK_ATTENTION_WINDOW_MS in shared/src/eval-schema.ts for the measured
+    /// rationale (an unwindowed bucket held 93% of all history). Both this
+    /// and the red band below are grep-pinned to the shared SSOT values by
+    /// apme-display-rules-sync.test.ts — change them together.
     static let taskAttentionWindowMs = 7 * 24 * 60 * 60 * 1000
+
+    /// Judged-score red band that pulls a recent task into attention.
+    /// Mirrors TASK_ATTENTION_RED_SCORE (shared/src/eval-schema.ts).
+    static let taskAttentionRedScore = 0.4
 
     /// Latest task-level `overall` eval, falling back to the composite.
     private static let taskScoreSql = """
@@ -629,7 +635,7 @@ final class ApmeStore: @unchecked Sendable {
         AND (t.boundary_signal = 'orphaned' \
         OR (t.ended_at IS NOT NULL AND EXISTS ( \
         SELECT 1 FROM turns tu WHERE tu.task_id = t.id AND tu.response IS NULL)) \
-        OR \(taskScoreSql) < 0.4)), 0)
+        OR \(taskScoreSql) < \(taskAttentionRedScore))), 0)
         """
     }
 
