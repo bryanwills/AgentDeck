@@ -35,6 +35,12 @@ bool begin(uint32_t sampleRate);
 // a ring buffer was allocated.
 bool present();
 
+// Read back the registers that decide whether the DAC is actually producing
+// output: clock manager, serial-data format, power/enable, mute and volume.
+// A codec that ACKs its whole init sequence and a codec that is producing sound
+// are different claims, and this is what separates them without a listener.
+void dumpRegs(const char* tag);
+
 /** True once begin() has confirmed the chip ID and completed the sequence. */
 bool ready();
 

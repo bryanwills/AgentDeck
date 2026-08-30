@@ -17,7 +17,7 @@ namespace {
 void codecRailEnable() {
 #if defined(BOARD_PIN_CODEC_EN) && BOARD_PIN_CODEC_EN >= 0
     gpio_config_t cfg = {};
-    cfg.mode = GPIO_MODE_OUTPUT;
+    cfg.mode = GPIO_MODE_INPUT_OUTPUT;   // see paSetup(): readable driver
     cfg.pin_bit_mask = 1ULL << BOARD_PIN_CODEC_EN;
     gpio_config(&cfg);
     gpio_set_level((gpio_num_t)BOARD_PIN_CODEC_EN, 1);
@@ -70,7 +70,16 @@ bool s_ready = false;
 // -18 dB. Picked by ear on the ips10 amplifier (2026-07-28): 0 dB and above
 // were reported painfully loud twice, while -18 dB was still clearly audible
 // as the quietest of three verified steps.
+// Default output level, as a percent of the -60..0 dB scale setVolume() maps.
+// This is an AMPLIFIER property, not a codec one: 70 was picked by ear on the
+// ips10 Class-D stage, and the RockBase NM's own vendor test runs its DAC at
+// 0x32=0xD3 (+10 dB) — 28 dB above what 70 produces here — so the same number
+// is inaudible on that board. Boards override it rather than sharing a guess.
+#if defined(BOARD_SPK_DEFAULT_VOLUME)
+int  s_volume = BOARD_SPK_DEFAULT_VOLUME;
+#else
 int  s_volume = 70;
+#endif
 // REG16 takes a gain *enum*, 0..7 == 0/6/12/18/24/30/36/42 dB (upstream
 // es8311_set_mic_gain writes the enum straight into the register). Note the
 // open sequence above writes 0x24 into the same register — that is a clock/ramp
@@ -116,7 +125,10 @@ void paSetup() {
     gpio_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.pin_bit_mask = 1ULL << BOARD_PIN_SPK_PA_EN;
-    cfg.mode = GPIO_MODE_OUTPUT;
+    // INPUT_OUTPUT, not OUTPUT: GPIO_MODE_OUTPUT disables the input buffer, so
+    // gpio_get_level() would report 0 no matter what the pin is driving — a
+    // diagnostic that always says "the amplifier is off" is worse than none.
+    cfg.mode = GPIO_MODE_INPUT_OUTPUT;
     gpio_config(&cfg);
     paEnable(false);
 #endif
@@ -194,6 +206,29 @@ bool present() {
         Serial.printf("[ES8311] probe at 0x%02X: codec present\n", ADDR);
     }
     return ok;
+}
+
+void dumpRegs(const char* tag) {
+    // Same register set the vendor's own T4 codec test dumps, so a reading here
+    // can be compared against theirs directly.
+    static const uint8_t regs[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+                                   0x07, 0x08, 0x09, 0x0A, 0x0D, 0x0E, 0x12,
+                                   0x13, 0x14, 0x31, 0x32, 0x37, 0x44, 0x45};
+    Serial.printf("[ES8311] regs (%s):", tag ? tag : "");
+    for (size_t i = 0; i < sizeof(regs); i++) {
+        uint8_t v = 0xFF;
+        const bool ok = rd(regs[i], &v);
+        Serial.printf(" %02X=%s%02X", regs[i], ok ? "" : "?", v);
+    }
+#if defined(BOARD_PIN_SPK_PA_EN) && BOARD_PIN_SPK_PA_EN >= 0
+    Serial.printf(" | PA(%d)=%d", BOARD_PIN_SPK_PA_EN,
+                  gpio_get_level((gpio_num_t)BOARD_PIN_SPK_PA_EN));
+#endif
+#if defined(BOARD_PIN_CODEC_EN) && BOARD_PIN_CODEC_EN >= 0
+    Serial.printf(" | CODEC_EN(%d)=%d", BOARD_PIN_CODEC_EN,
+                  gpio_get_level((gpio_num_t)BOARD_PIN_CODEC_EN));
+#endif
+    Serial.println();
 }
 
 bool begin(uint32_t sampleRate) {

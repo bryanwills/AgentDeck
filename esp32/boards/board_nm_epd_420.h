@@ -50,6 +50,12 @@
 #define BOARD_PIN_MIC_DIN        16     // codec ASDOUT -> ESP32
 #define BOARD_PIN_SPK_PA_EN      41     // external power-amp enable
 #define BOARD_PIN_CODEC_EN       44     // codec rail enable, held high while audio is up
+// Unity (0 dB). The shared default of 70 is -18 dB, which measured inaudible on
+// this board's Class-D stage; the vendor's own T4 codec test writes 0x32=0xD3
+// (+10 dB) here. 100 is the loudest value the shared scale offers without
+// boost — if that is still too quiet the scale needs a board dB offset, not a
+// larger percent.
+#define BOARD_SPK_DEFAULT_VOLUME 100
 //
 // Capture is deliberately NOT enabled yet, and the reason is UX rather than
 // wiring: the codec is full-duplex, so the ADC needs no extra hardware, but

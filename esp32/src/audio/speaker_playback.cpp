@@ -140,6 +140,8 @@ static void playbackTask(void* param) {
     // the log line is what tells the two apart.
     if (!Es8311::begin((uint32_t)s_sampleRate)) {
         Serial.println("[Speaker] ES8311 init failed — samples will go nowhere");
+    } else {
+        Es8311::dumpRegs("after init, before samples");
     }
 #endif
 
