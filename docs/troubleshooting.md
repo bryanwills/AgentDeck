@@ -21,7 +21,7 @@
 ## tmux -CC Compatibility
 
 Normal hook-observed sessions need no special handling under iTerm2 `tmux -CC`.
-If you opt into the managed-terminal path, run `agentdeck claude` inside a tmux
+If you are migrating from the deprecated managed-terminal path, run `agentdeck claude` inside a tmux
 window; the bridge owns only its child PTY.
 
 Signal chain: `tmux → iTerm2 → agentdeck → bridge PTY → claude`

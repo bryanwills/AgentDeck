@@ -12,6 +12,7 @@ import {
   daemonPostureArgs,
   buildPlist,
   waitForDaemonPid,
+  managedPtyDeprecationNotice,
 } from '../cli.js';
 import { allModulesOff } from '../modules/types.js';
 
@@ -54,6 +55,32 @@ describe('agentdeck CLI parser', () => {
     expect(stderr).toContain("error: unknown command 'tomebox'");
     expect(stderr).toContain('(Did you mean timebox?)');
     expect(stderr).not.toContain('too many arguments');
+  });
+
+  it('marks every legacy per-session command as deprecated in --help metadata', () => {
+    for (const name of ['claude', 'codex', 'opencode', 'monitor']) {
+      const command = program.commands.find((candidate) => candidate.name() === name);
+      expect(command?.description()).toContain('[deprecated]');
+    }
+  });
+});
+
+describe('managed PTY deprecation contract', () => {
+  it.each(['claude', 'codex', 'opencode'] as const)(
+    'points agentdeck %s users to daemon-first direct launch',
+    (command) => {
+      const notice = managedPtyDeprecationNotice(command).join('\n');
+      expect(notice).toContain(`agentdeck ${command}`);
+      expect(notice).toContain('agentdeck daemon install');
+      expect(notice).toContain(`run \`${command}\` directly`);
+      expect(notice).toContain('issues/273');
+    },
+  );
+
+  it('points monitor users to all normal agent entry points', () => {
+    const notice = managedPtyDeprecationNotice('monitor').join('\n');
+    expect(notice).toContain('agentdeck monitor');
+    expect(notice).toContain('run `claude`, `codex`, or `opencode` normally');
   });
 });
 
@@ -366,6 +393,16 @@ describe('claude action wiring (parseAsync end-to-end)', () => {
   afterEach(() => {
     startSessionMock.mockClear();
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it('prints the migration warning before starting the still-functional bridge', async () => {
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await program.parseAsync([...base, 'claude', '--no-env-args']);
+
+    expect(startSessionMock).toHaveBeenCalledTimes(1);
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('DEPRECATED'));
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('agentdeck daemon install'));
   });
 
   it('without the hatch: env flags parse in and the agent command is woven', async () => {

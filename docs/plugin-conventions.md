@@ -35,7 +35,7 @@ Claude Code v2.1+ requires 3-level nesting: `{ matcher: "", hooks: [{ type: "com
 
 ## Version compatibility check
 
-`agentdeck claude` 시작 시 Claude Code 버전 → npm registry metadata(3s)로 호환성을 조회한다. `bridge/package.json`의 `compatibleClaudeCode` semver range로 판정. 비호환 시 자동 `npm install -g @agentdeck/bridge@latest` + 재시작 안내. `~/.agentdeck/compatibility.json`은 상태 캐시(1시간 throttle)일 뿐 배포 manifest가 아니다. `--no-update-check`로 비활성화. **절대 startup을 block하지 않음** — 모든 실패 케이스는 경고 후 진행.
+Deprecated `agentdeck claude` 시작 시 Claude Code 버전 → npm registry metadata(3s)로 호환성을 조회한다. `bridge/package.json`의 `compatibleClaudeCode` semver range로 판정. 비호환 시 자동 `npm install -g @agentdeck/bridge@latest` + 재시작 안내. `~/.agentdeck/compatibility.json`은 상태 캐시(1시간 throttle)일 뿐 배포 manifest가 아니다. `--no-update-check`로 비활성화. **절대 startup을 block하지 않음** — 모든 실패 케이스는 경고 후 진행. Managed path 제거 전에 이 진단은 #273에 따라 daemon-first 명령으로 이동해야 한다.
 
 ## Agent state detection
 

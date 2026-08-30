@@ -604,8 +604,7 @@ function success(opts: SetupOptions, daemonInstalled: boolean) {
   console.log('  Usage:');
   console.log('    agentdeck daemon install   Start monitoring on login');
   console.log('    agentdeck dashboard        Open the terminal dashboard');
-  console.log('    agentdeck claude           Optional managed Claude terminal');
-  console.log('    agentdeck codex            Optional managed Codex terminal');
+  console.log("    claude / codex / opencode  Run agents normally; hooks/events discover them");
   console.log('    agentdeck status   Check status');
   console.log('    agentdeck stop     Stop bridge');
   console.log('');

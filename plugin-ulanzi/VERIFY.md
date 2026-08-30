@@ -34,7 +34,7 @@ Already set up for you:
 2. **(Recommended) Run a daemon with a live session** so tiles have content —
    in its own terminal:
    ```bash
-   agentdeck daemon start --foreground   # or: agentdeck claude
+   agentdeck daemon start --foreground
    ```
    Start a Claude/Codex/OpenCode session so it reaches an `awaiting`/`processing`
    state (that's what animates).

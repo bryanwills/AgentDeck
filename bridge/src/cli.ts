@@ -53,6 +53,28 @@ function warnIfDaemonHostIgnored(opts: { remoteDaemon?: boolean; daemonHost?: st
   }
 }
 
+export type DeprecatedSessionCommand = 'claude' | 'codex' | 'opencode' | 'monitor';
+
+/**
+ * User-visible migration notice for the legacy per-session bridge. Keep this
+ * pure so CLI tests can pin the public deprecation contract without starting
+ * a PTY or importing its native dependencies.
+ */
+export function managedPtyDeprecationNotice(command: DeprecatedSessionCommand): string[] {
+  const directLaunch = command === 'monitor'
+    ? 'run `claude`, `codex`, or `opencode` normally'
+    : `run \`${command}\` directly`;
+  return [
+    `[agentdeck] DEPRECATED: \`agentdeck ${command}\` uses the legacy per-session bridge and will be removed in the next AgentDeck compatibility-major release.`,
+    `[agentdeck] Migrate now: run \`agentdeck daemon install\`, then ${directLaunch}.`,
+    '[agentdeck] PTY-only features such as --remote-daemon, --weight, terminal UI steering, and terminal telemetry have no direct-launch equivalent. Tracking: https://github.com/puritysb/AgentDeck/issues/273',
+  ];
+}
+
+function warnManagedPtyDeprecation(command: DeprecatedSessionCommand): void {
+  for (const line of managedPtyDeprecationNotice(command)) console.error(line);
+}
+
 function log(msg: string): void {
   process.stderr.write(msg + '\n');
 }
@@ -642,7 +664,7 @@ weatherCommand
 
 program
   .command('claude')
-  .description('Start Claude Code session (PTY + bridge)')
+  .description('[deprecated] Start Claude Code in the legacy PTY session bridge')
   .option('-p, --port <port>', 'Bridge server port', String(BRIDGE_WS_PORT))
   .option('-c, --command <cmd>', 'Command to spawn', 'claude')
   .option('-d, --debug', 'Enable debug logging')
@@ -658,6 +680,7 @@ program
   .option('--no-env-args', 'Ignore AGENTDECK_COMMANDER_ARGS and AGENTDECK_<AGENT>_ARGS for this invocation')
   .option('--weight <n>', 'Deck/tab sort order override (integer, lower first; default 0)', parseWeight)
   .action(async (opts) => {
+    warnManagedPtyDeprecation('claude');
     warnIfDaemonHostIgnored(opts);
     const { startSession } = await import('./index.js');
     await startSession({
@@ -687,7 +710,7 @@ program
 
 program
   .command('codex')
-  .description('Start Codex CLI session (PTY + bridge)')
+  .description('[deprecated] Start Codex in the legacy PTY session bridge')
   .option('-p, --port <port>', 'Bridge server port', String(BRIDGE_WS_PORT))
   .option('-c, --command <cmd>', 'Command to spawn', 'codex')
   .option('-d, --debug', 'Enable debug logging')
@@ -701,6 +724,7 @@ program
   .option('--no-env-args', 'Ignore AGENTDECK_COMMANDER_ARGS and AGENTDECK_<AGENT>_ARGS for this invocation')
   .option('--weight <n>', 'Deck/tab sort order override (integer, lower first; default 0)', parseWeight)
   .action(async (opts) => {
+    warnManagedPtyDeprecation('codex');
     warnIfDaemonHostIgnored(opts);
     // Install Codex lifecycle hooks before starting the session so the
     // first prompt's UserPromptSubmit / Stop events reach the daemon.
@@ -745,7 +769,7 @@ program
 
 program
   .command('opencode')
-  .description('Start OpenCode session (PTY + SSE bridge)')
+  .description('[deprecated] Start OpenCode in the legacy PTY/SSE session bridge')
   .option('-p, --port <port>', 'Bridge server port', String(BRIDGE_WS_PORT))
   .option('-c, --command <cmd>', 'Command to spawn', 'opencode')
   .option('-d, --debug', 'Enable debug logging')
@@ -759,6 +783,7 @@ program
   .option('--no-env-args', 'Ignore AGENTDECK_COMMANDER_ARGS and AGENTDECK_<AGENT>_ARGS for this invocation')
   .option('--weight <n>', 'Deck/tab sort order override (integer, lower first; default 0)', parseWeight)
   .action(async (opts) => {
+    warnManagedPtyDeprecation('opencode');
     warnIfDaemonHostIgnored(opts);
     // Install the OpenCode observer plugin so standalone `opencode` runs
     // (outside this managed session) also reach the daemon timeline. The
@@ -801,7 +826,7 @@ program
 
 program
   .command('monitor')
-  .description('Start hook-only bridge (no PTY — run claude separately)')
+  .description('[deprecated] Start the legacy hook-only per-session bridge')
   .option('-p, --port <port>', 'Bridge server port', String(BRIDGE_WS_PORT))
   .option('-d, --debug', 'Enable debug logging')
   .option('--local', 'Disable all device modules')
@@ -812,6 +837,7 @@ program
   .option('--no-env-args', 'Ignore AGENTDECK_COMMANDER_ARGS for this invocation')
   .option('--weight <n>', 'Deck/tab sort order override (integer, lower first; default 0)', parseWeight)
   .action(async (opts) => {
+    warnManagedPtyDeprecation('monitor');
     warnIfDaemonHostIgnored(opts);
     const { startSession } = await import('./index.js');
     const port = parseInt(opts.port, 10);
@@ -2504,14 +2530,21 @@ program
   .option('--json', 'Print target diagnostics as machine-readable JSON')
   .action(async (target, opts) => {
     if (target) {
-      if (target !== 'kiro') {
-        log(`Unknown diagnostic target: ${target}. Supported target: kiro`);
+      if (target !== 'kiro' && target !== 'agents') {
+        log(`Unknown diagnostic target: ${target}. Supported targets: agents, kiro`);
         process.exitCode = 1;
         return;
       }
       if (opts.analyze) {
         log('`--analyze` is only available for the general daemon diagnostic dump.');
         process.exitCode = 1;
+        return;
+      }
+      if (target === 'agents') {
+        const { collectAgentCliDiagnosticReport, formatAgentCliDiagnosticReport } =
+          await import('./agent-cli-diagnostics.js');
+        const report = collectAgentCliDiagnosticReport();
+        process.stdout.write(`${opts.json ? JSON.stringify(report, null, 2) : formatAgentCliDiagnosticReport(report)}\n`);
         return;
       }
       const { collectKiroDiagnosticReport, formatKiroDiagnosticReport } = await import('./kiro-diagnostics.js');
