@@ -18,6 +18,10 @@ void epd_poweroff();
 void epd_clear();
 void epd_clear_area(LilyEpdRect area);
 void epd_draw_grayscale_image(LilyEpdRect area, uint8_t* data);
+// enum DrawMode_t in the vendor header; BLACK_ON_WHITE = 1<<0, WHITE_ON_WHITE
+// = 1<<1. Passing the PREVIOUS frame with WHITE_ON_WHITE drives exactly the
+// pixels that were dark back to paper — a targeted erase instead of a clear.
+void epd_draw_image(LilyEpdRect area, uint8_t* data, int mode);
 }
 // GxEPD color constants are not available on the LilyGo parallel driver.
 #define GxEPD_BLACK 0x0000
@@ -192,6 +196,17 @@ public:
             return false;
         }
         memset(pixels_, 0xFF, FRAME_BYTES);
+        // Second frame: what is physically on the glass. A page swap used to
+        // cost a whole-panel epd_clear(), which on this driver is several full
+        // black/white inversions — one tap read as a storm of flashes. With the
+        // previous frame retained, the old ink can be erased where it actually
+        // is. Optional: if PSRAM cannot spare it the surface degrades to the
+        // clearing path rather than failing.
+        prev_ = static_cast<uint8_t*>(heap_caps_calloc(
+            FRAME_BYTES, 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        if (prev_) memset(prev_, 0xFF, FRAME_BYTES);
+        else Serial.println("[Eink] no PSRAM for the previous frame — page "
+                            "changes will keep using a full clear");
         logHeap("lily-epd-framebuffer");
         return true;
     }
@@ -217,9 +232,20 @@ public:
     }
 
     uint8_t* pixels() { return pixels_; }
+    uint8_t* prev() { return prev_; }
+    void retainFrame() {
+        if (pixels_ && prev_)
+            memcpy(prev_, pixels_, (size_t)SCREEN_W * SCREEN_H / 2);
+    }
+    // After a real clear the glass is uniformly white, so the retained frame
+    // must say so or the next erase pass would chase ink that is already gone.
+    void forgetFrame() {
+        if (prev_) memset(prev_, 0xFF, (size_t)SCREEN_W * SCREEN_H / 2);
+    }
 
 private:
     uint8_t* pixels_;  // owned for device lifetime; intentionally never freed
+    uint8_t* prev_ = nullptr;
 };
 
 LilyEpdCanvas display;
@@ -2179,11 +2205,18 @@ uint32_t fullRefreshCountValue = 0;
 bool key1Prev = true, key2Prev = true;
 uint32_t keyLastMs = 0;
 
-// bodyOnlyClear is EPD47-only and means "the header band is provably identical
-// to what is already on the glass". It is NOT a guess: the caller sets it only
-// when the page and the link state both match what was last physically written.
+// How a changed EPD47 frame gets the previous ink off the glass. Decided once
+// by the caller: deriving it again here from partialCount/lastFullMs would be
+// the same predicate in two places, and those drift.
+enum class Erase : uint8_t {
+    None = 0,      // partial image write, nothing to take off
+    Differential,  // drive the retained previous frame back to paper
+    ClearBody,     // hard anti-ghost sweep, header provably unchanged
+    ClearAll,      // hard anti-ghost sweep of the whole panel
+};
+
 void refresh(void (*draw)(const Snap&), const Snap& s, bool full,
-             bool bodyOnlyClear = false) {
+             Erase erase = Erase::ClearAll) {
     // Count at the one choke point that performs physical panel I/O, not at
     // render requests (most of which content-hash/rate gates intentionally
     // discard). Relaxed atomics keep device_info reads race-free across the
@@ -2194,28 +2227,41 @@ void refresh(void (*draw)(const Snap&), const Snap& s, bool full,
     display.fillScreen(GxEPD_WHITE);
     draw(s);
     epd_poweron();
+    const LilyEpdRect fullArea{0, 0, SCREEN_W, SCREEN_H};
     if (full) {
         // epd_draw_grayscale_image() alone does not erase the prior physical
-        // image. This is the real full refresh that removes both factory art
-        // and old AgentDeck frames before the new framebuffer is written.
-        if (bodyOnlyClear) {
-            // Periodic anti-ghosting with an unchanged header: sweeping the
-            // wordmark and tab strip flashes the one region that provably did
-            // not change. The body still gets a real erase, so ghosting is
-            // bounded exactly as before.
-            const LilyEpdRect body{0, EPD47_HEADER_H, SCREEN_W,
-                                   SCREEN_H - EPD47_HEADER_H};
-            epd_clear_area(body);
-        } else {
-            epd_clear();
+        // image, so a changed frame needs the old ink taken off first — and the
+        // two ways of doing that are not equally loud. A periodic anti-ghosting
+        // sweep genuinely wants the hard waveform; it exists to reset pigment
+        // that differential passes leave behind. A content change does not:
+        // driving the RETAINED previous frame back to paper erases exactly the
+        // pixels carrying ink and leaves the rest of the panel alone.
+        // epd_clear() instead runs several whole-panel inversions, which is why
+        // one tab tap read as a storm of flashes.
+        const Erase mode = display.prev() ? erase : Erase::ClearAll;
+        switch (mode) {
+            case Erase::Differential:
+                epd_draw_image(fullArea, display.prev(), 1 << 1);  // WHITE_ON_WHITE
+                break;
+            case Erase::ClearBody: {
+                const LilyEpdRect body{0, EPD47_HEADER_H, SCREEN_W,
+                                       SCREEN_H - EPD47_HEADER_H};
+                epd_clear_area(body);
+                display.forgetFrame();
+                break;
+            }
+            default:
+                epd_clear();
+                display.forgetFrame();
+                break;
         }
         partialCount = 0;
         lastFullMs = millis();
     } else {
         partialCount++;
     }
-    const LilyEpdRect fullArea{0, 0, SCREEN_W, SCREEN_H};
     epd_draw_grayscale_image(fullArea, display.pixels());
+    display.retainFrame();
     epd_poweroff();
 #else
 #if defined(BOARD_NM_EPD_420)
@@ -2688,7 +2734,17 @@ void render() {
     const bool epd47HeaderStable = !firstDraw && physicalEpd47PageReady &&
                                    epd47Page == lastPhysicalEpd47Page &&
                                    searching == wasSearching;
-    refresh(searching ? drawSearching : drawDashboard, s, full, epd47HeaderStable);
+    // Is this `full` the scheduled pigment reset, or just changed content? Only
+    // the former earns the hard waveform. Read the same counters the `full`
+    // decision above read, before refresh() resets them.
+    const bool epd47AntiGhost = firstDraw ||
+                                partialCount >= FULL_EVERY_N_PARTIALS ||
+                                (uint32_t)(now - lastFullMs) > FULL_MAX_AGE_MS;
+    const Erase epd47Erase =
+        !full ? Erase::None
+              : (epd47AntiGhost ? (epd47HeaderStable ? Erase::ClearBody : Erase::ClearAll)
+                                : Erase::Differential);
+    refresh(searching ? drawSearching : drawDashboard, s, full, epd47Erase);
 #else
     refresh(searching ? drawSearching : drawDashboard, s, full);
 #endif
