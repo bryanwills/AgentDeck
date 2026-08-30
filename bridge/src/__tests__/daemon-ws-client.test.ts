@@ -170,3 +170,23 @@ describe('DaemonWsClient target re-resolution (real socket, short backoff)', () 
     }
   });
 });
+
+describe('DaemonWsClient shutdown', () => {
+  it('does not leak an asynchronous error when closed while CONNECTING', async () => {
+    const http = createServer(() => {
+      // Leave the upgrade unanswered so the client remains CONNECTING.
+    });
+    await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve));
+    const port = (http.address() as { port: number }).port;
+    const client = new DaemonWsClient('sess-closing', 4324);
+
+    try {
+      client.connect({ host: '127.0.0.1', port });
+      client.close();
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    } finally {
+      client.close();
+      http.close();
+    }
+  });
+});
