@@ -115,6 +115,14 @@ actor ESP32Serial {
     private let statusShadow = SerialStatusShadow()
     private static let permanentBlockDuration: TimeInterval = 300  // 5 minutes
     private static let serialOpenTimeoutSec: TimeInterval = 3
+    /// Blocking serial opens run here so they can never be starved by
+    /// cooperative-pool or actor load. Concurrent: one wedged device must not
+    /// block every other port's open behind it. See `beginOpenPort`.
+    private static let openQueue = DispatchQueue(
+        label: "esp32.open",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
     private static let deviceInfoTimeoutSec: TimeInterval = 30  // retry device_info if absent
     // An identified connection that read before but has been RX-silent this
     // long is half-open: the board hung/rebooted badly or the CH340 RX path
@@ -543,12 +551,36 @@ actor ESP32Serial {
         let token = OpenAttemptToken()
         openingPorts[port] = token
 
-        Task.detached(priority: .utility) { [weak self, token] in
+        // The open itself is fast — `open()` + `tcsetattr` measured at 10-13ms
+        // across CDC and CH340 ports. What used to time out was never the work:
+        // the attempt ran as a `.utility` cooperative-pool task and reported back
+        // by hopping onto @DaemonActor, while the timeout below hopped onto the
+        // SAME actor at default priority. An actor dispatches its queue by
+        // PRIORITY, not FIFO, so under daemon load the timer job preempted a
+        // completion that had been ready for seconds, and a board that opened in
+        // 10ms was recorded as an open failure. Measured 2026-08-30: only 4-6 of
+        // 11 attached boards survived a daemon start, and WHICH ones was random
+        // per launch — the giveaway that this is scheduling, not hardware. The
+        // orphaned descriptor then sat open (lsof: offset 0t0, several per port)
+        // until the late completion finally ran and closed it.
+        //
+        // So: run the blocking open on our own queue, never the cooperative pool,
+        // and make the completion strictly outrank its own timeout. The queue is
+        // concurrent on purpose — a single wedged device must not hold the other
+        // ten behind it, which is the whole reason the timeout exists.
+        Self.openQueue.async { [weak self, token] in
             let result = Self.openSerialDescriptor(port, token: token)
-            await self?.finishOpenPort(port: port, token: token, result: result)
+            guard let self else {
+                // Nobody left to hand the descriptor to; don't strand it.
+                if case .opened(let fd) = result { Darwin.close(fd) }
+                return
+            }
+            Task(priority: .userInitiated) {
+                await self.finishOpenPort(port: port, token: token, result: result)
+            }
         }
 
-        Task { [weak self, token] in
+        Task(priority: .utility) { [weak self, token] in
             try? await Task.sleep(for: .seconds(Self.serialOpenTimeoutSec))
             await self?.markOpenTimedOut(port: port, token: token)
         }
