@@ -17,17 +17,23 @@ npm install -g @agentdeck/bridge
 ## Usage
 
 ```bash
-agentdeck claude          # run Claude Code inside an AgentDeck session bridge
-agentdeck codex           # same for Codex
-agentdeck opencode        # same for OpenCode
-agentdeck monitor         # terminal dashboard
-agentdeck daemon start    # start the daemon hub (port 9120)
+agentdeck daemon install  # install hooks and start the daemon on login
+claude                    # or: codex / opencode
+agentdeck dashboard       # terminal dashboard
+agentdeck daemon start    # start the daemon hub manually (port 9120)
 agentdeck devices         # list connected display devices
 agentdeck qr              # pairing QR for the iOS/Android companion apps
 agentdeck --help          # full command reference
 ```
 
-The daemon is the hub every dashboard client talks to; session bridges wrap your agent CLI in a PTY, report state via lifecycle hooks, and let paired devices steer the session (answer prompts, approve tools, switch modes).
+The daemon is the hub every dashboard client talks to. Normal agent commands
+report through lifecycle hooks or native event channels and can be steered where
+the observed session exposes a real delivery path.
+
+The legacy `agentdeck claude|codex|opencode|monitor` per-session bridges remain
+functional during the current compatibility-major but are deprecated under
+[#273](https://github.com/puritysb/AgentDeck/issues/273). Do not build new
+workflows around their PTY-only options.
 
 Full CLI reference: https://github.com/puritysb/AgentDeck/blob/master/docs/cli.md
 

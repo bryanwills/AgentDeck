@@ -181,7 +181,7 @@ capabilities, then replies only to that connection:
   "protocol": 1,
   "profile": "companion-control/v1",
   "capabilities": ["sessions.read", "usage.read", "permission.decide", "prompt.select", "review.run"],
-  "serverVersion": "1.1.0"
+  "serverVersion": "1.2.0"
 }
 ```
 

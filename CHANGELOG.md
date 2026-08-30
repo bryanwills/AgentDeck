@@ -38,6 +38,58 @@ file's own rule forbids reconstructing its notes. The commit above is the
 record. `npm 1.0.16` (`37c674b8`) is a different case and needs nothing — it was
 bumped, superseded by 1.0.17, and never published, so it exists only in git.
 
+## 2026-08-31 — npm 1.2.0
+
+This is a backward-compatible minor release. It keeps protocol compatibility
+major 1 and delivers the daemon, Surface, and Work-board changes accumulated
+since npm 1.1.0. Managed agent launchers still work in this release; their
+deprecation is an announced migration, not a removal.
+
+### Normal agent commands are now the only recommended launch path
+
+`agentdeck claude`, `agentdeck codex`, `agentdeck opencode`, and
+`agentdeck monitor` now identify themselves as deprecated in help and print an
+actionable warning before starting their existing per-session bridge. The
+replacement is `agentdeck daemon install` followed by the agent's normal
+command. `agentdeck diag agents [--json]` checks the installed Claude Code,
+Codex, and OpenCode versions against AgentDeck's lifecycle compatibility
+baselines without opening a PTY or requiring a running daemon.
+
+The old commands are not tombstones: remote attach, `--weight`, terminal UI
+steering, and terminal telemetry still have no direct-launch equivalent, so
+the managed implementation and `node-pty` remain available through the 1.x
+compatibility window. A 1.1 managed worker's register/state frames remain
+accepted by the 1.2 daemon and continue to surface as managed sessions.
+
+### Portable readers receive complete, bounded content
+
+The daemon now distributes the licensed Pocket Daily Japanese N3 learning
+pack and an automatic reader font pack, serves large assets in bounded resume
+segments, and drives pull-aware paper faces for XTEink and InkDeck-class
+readers. Surface mode and refresh counters make offline, sleeping, live, and
+interactive states explicit instead of inferring them from whichever transport
+last spoke. E-ink rotation, hardware refresh policy, and offline/connected
+interaction states are aligned across the reader firmware and first-party
+previews.
+
+### Work-board tasks have stable names and useful boundaries
+
+APME derives deterministic task titles and folded action lines from shared
+rules, applies a measured idle-gap boundary, reaches both Node and native daemon
+topologies, and exposes session drill-down data. The generated dashboard and
+native mirrors replay the same vectors so a task is named and grouped the same
+way on every surface.
+
+### Codex limits and daemon shutdown are more reliable
+
+Codex live-limit reconciliation now resolves the account/limit family before
+accepting a passive reading, uses the weekly reset as an anchor with bounded
+jitter, and refuses per-model pools that cannot vouch for the account reading.
+This prevents an active rollout from replacing the real weekly account limit
+with a differently scoped pool. Daemon push sockets also shut down safely while
+still connecting, so test and process teardown no longer leaks an asynchronous
+WebSocket error.
+
 ## 2026-08-27 — Apple 1.1.0
 
 ### The standalone Mac daemon now speaks the complete portable transport

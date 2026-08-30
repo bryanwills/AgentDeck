@@ -602,12 +602,12 @@ export async function startSession(opts: SessionOptions): Promise<void> {
     const hookSilence = new CodexHookSilenceWarning({
       onSilent: () => {
         log('WARNING: no Codex lifecycle event has reached this bridge — state/timeline/eval are blind for this session.');
-        log('Repair: rerun `agentdeck codex` (reinstalls hooks) or `agentdeck daemon install`, and check [hooks]/notify in ~/.codex/config.toml.');
+        log('Repair: run `agentdeck daemon install`, then check [hooks]/notify in ~/.codex/config.toml.');
         core.bridgeTimeline.addEntry({
           ts: Date.now(),
           type: 'error',
           raw: 'Codex lifecycle hooks silent — session is lifecycle-blind',
-          detail: 'The terminal is active but no codex_* hook or notify event arrived. Hooks and the notify fallback share one curl/port path in ~/.codex/config.toml, so a stale port or config-layer conflict kills both. Rerun `agentdeck codex` or `agentdeck daemon install` to repair.',
+          detail: 'The terminal is active but no codex_* hook or notify event arrived. Hooks and the notify fallback share one curl/port path in ~/.codex/config.toml, so a stale port or config-layer conflict kills both. Run `agentdeck daemon install` to repair.',
           agentType: 'codex-cli',
         });
       },

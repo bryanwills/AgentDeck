@@ -15,12 +15,18 @@ That is the whole install, on every platform. The wizard:
 3. Registers Claude Code lifecycle hooks so sessions report state automatically
 4. Seeds the local data directory
 
-Then start a session through AgentDeck:
+Then start the daemon and run your agent normally:
 
 ```bash
-agentdeck claude     # or: agentdeck codex / agentdeck opencode
-agentdeck monitor    # terminal dashboard
+agentdeck daemon install
+claude               # or: codex / opencode
+agentdeck dashboard  # optional terminal dashboard
 ```
+
+The legacy `agentdeck claude`, `agentdeck codex`, `agentdeck opencode`, and
+`agentdeck monitor` session bridges are deprecated and tracked in
+[#273](https://github.com/puritysb/AgentDeck/issues/273). They remain functional
+during the current compatibility-major for migration.
 
 No Stream Deck required — the daemon is the product; decks and other devices are optional ways to look at it.
 
@@ -43,7 +49,7 @@ No Stream Deck required — the daemon is the product; decks and other devices a
 
 ### Linux
 
-- The Elgato Stream Deck desktop app does not exist on Linux, so the Stream Deck plugin is skipped — the daemon, `agentdeck monitor` terminal dashboard, hardware devices, and the Android/iOS companion apps all work.
+- The Elgato Stream Deck desktop app does not exist on Linux, so the Stream Deck plugin is skipped — the daemon, `agentdeck dashboard` terminal dashboard, hardware devices, and the Android/iOS companion apps all work.
 - If the prebuilt `node-pty` binary fails: Debian/Ubuntu `sudo apt install build-essential python3`, Fedora `sudo dnf install gcc-c++ make python3`, Arch `sudo pacman -S base-devel python`.
 - Autostart: `agentdeck daemon install` registers a systemd `--user` unit; for headless boot run `loginctl enable-linger $USER` once.
 - Details: [Linux guide](https://github.com/puritysb/AgentDeck/blob/master/docs/linux.md)

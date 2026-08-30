@@ -121,6 +121,47 @@ describe('session push channel (real handler, fake sockets)', () => {
     expect(getRemoteSession(ID)!.host).toBe('192.168.1.55');
   });
 
+  it('accepts the exact npm 1.1 managed-worker register/state shape', () => {
+    const sock = fakeSocket();
+    senderIps.set(sock, '::ffff:192.168.1.55');
+
+    // Literal fixture copied from npm-v1.1.0 DaemonWsClient frames. Keep it
+    // independent of current sender types so deleting or requiring a field in
+    // 1.2+ fails the announced managed-worker compatibility window.
+    const registerV110 = {
+      type: 'session_push_register',
+      sessionId: ID,
+      port: 4321,
+      agentType: 'claude-code',
+      projectName: 'legacy-worker',
+      host: undefined,
+      remoteAttach: undefined,
+      weight: 0,
+    };
+    const stateV110 = {
+      type: 'session_push_state',
+      sessionId: ID,
+      state: 'awaiting_permission',
+      modelName: 'claude-opus-4-1',
+      effortLevel: undefined,
+      permissionMode: 'default',
+      projectName: 'legacy-worker',
+      agentType: 'claude-code',
+    };
+
+    expect(handle(registerV110, sock as unknown as WebSocket)).toBe(true);
+    expect(handle(stateV110, sock as unknown as WebSocket)).toBe(true);
+    expect(frames(sock)).toContainEqual({ type: 'session_push_ack', sessionId: ID });
+    expect(listRemoteEnriched().find((session) => session.id === ID)).toMatchObject({
+      projectName: 'legacy-worker',
+      state: 'awaiting_permission',
+      modelName: 'claude-opus-4-1',
+      permissionMode: 'default',
+      weight: 0,
+      controlMode: 'managed',
+    });
+  });
+
   it('worker reconnect: new socket takes over, old close cannot kill the new registration or focus', () => {
     const oldSock = fakeSocket();
     register(oldSock, { ip: '127.0.0.1', remoteAttach: true });
