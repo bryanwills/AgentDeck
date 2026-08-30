@@ -309,7 +309,11 @@ fun ManualUrlInput(
                 value = urlInput,
                 onValueChange = { urlInput = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("ws://192.168.1.x:9120?token=abc") },
+                // No token in the hint any more: an address alone is enough now. The
+                // daemon refuses it, records the knock, and the operator approves
+                // it on the Mac — which asks nothing of whoever is holding this
+                // device. A token still works if one is pasted.
+                placeholder = { Text("192.168.1.5:9120") },
                 singleLine = true,
                 label = { Text("Manual URL") },
             )
@@ -411,9 +415,9 @@ fun PairingCodeInput(
                 // closed daemon cannot be probed for "is someone pairing"; the
                 // copy here is what turns that into something actionable.
                 PairingCodeClient.Result.NoWindow ->
-                    message = "No pairing window. Run \"agentdeck pair\" on your Mac."
+                    message = "No pairing window. On your Mac: Devices \u203a Pair Device."
                 PairingCodeClient.Result.WindowClosed ->
-                    message = "That window closed. Run \"agentdeck pair\" again."
+                    message = "That window closed. Open a new one on your Mac."
                 is PairingCodeClient.Result.Unreachable ->
                     message = "Could not reach ${daemon.name}: ${result.detail}"
             }
@@ -422,7 +426,7 @@ fun PairingCodeInput(
 
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
-            text = "Pair with a code — run \"agentdeck pair\" on your Mac",
+            text = "Pair with a code from your Mac (Devices \u203a Pair Device)",
             style = MaterialTheme.typography.bodySmall,
             color = if (isEink) Color.DarkGray else MaterialTheme.colorScheme.onSurfaceVariant,
         )

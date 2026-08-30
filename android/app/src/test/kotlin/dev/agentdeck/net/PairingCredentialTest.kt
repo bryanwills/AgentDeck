@@ -163,8 +163,8 @@ class PairingCredentialTest {
             setOf("192.168.1.10:9120"),
         )
         assertEquals(
-            "Not paired with 192.168.1.10:9120 — run \"agentdeck pair\" on your Mac, " +
-                "then enter the code in Settings",
+            "Waiting for approval — open AgentDeck on your Mac, " +
+                "Devices \u203a Pair Device, and approve 192.168.1.10:9120",
             detail,
         )
     }
@@ -190,12 +190,20 @@ class PairingCredentialTest {
     @Test
     fun `the advice a camera-less reader is given is one it can actually take`() {
         // This copy is the whole recovery path on a device with no camera and no
-        // cable, so it must not send the user back to typing a token URL on an
-        // e-ink keyboard — that was the old text, and it is why these readers
-        // stayed unpaired.
+        // cable. It has been wrong twice, each time by asking the DEVICE for
+        // something it cannot give: first a 32-character token typed on an e-ink
+        // keyboard, then a six-digit code that is only reachable once mDNS has
+        // found the daemon — which, on a device reading this, it may never have.
+        //
+        // So the assertions pin the invariant rather than the sentence: whatever
+        // the wording, it must not route the user through a token, and must not
+        // send them to a CLI the App Store build does not ship. Rewording the
+        // copy should not need a test edit; regressing it should.
         val detail = PairingCredential.disconnectedDetail(null, setOf("192.168.1.10:9120"))!!
-        assertTrue(detail.contains("agentdeck pair"))
         assertFalse(detail.contains("token="))
+        assertFalse(detail.contains("agentdeck pair"))
+        assertTrue(detail.contains("approve") || detail.contains("approval"))
+        assertTrue(detail.contains("192.168.1.10:9120"))
     }
 
     @Test

@@ -453,9 +453,14 @@ struct SettingsScreen: View {
                 .buttonStyle(.bordered)
                 .tint(.red)
             } else {
-                // Manual URL input
+                // Manual address input. No token in the hint: an address alone
+                // is enough now — the daemon refuses it, records the knock, and
+                // the operator approves the device on the Mac. That path asks
+                // nothing of whoever is holding this device, which is the whole
+                // point on a screen with an awkward keyboard. A full
+                // `ws://host:port?token=…` still works if one is pasted.
                 HStack {
-                    TextField("ws://192.168.1.x:9120", text: $manualUrl)
+                    TextField("192.168.1.5:9120", text: $manualUrl)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 12, design: .monospaced))
                         #if os(iOS)
@@ -471,6 +476,10 @@ struct SettingsScreen: View {
                     .tint(Color(red: 0.231, green: 0.51, blue: 0.965))
                     .disabled(manualUrl.isEmpty)
                 }
+
+                Text("Then approve this device on the Mac: Devices \u{203a} Pair Device.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
 
                 if stateHolder.connection.isReconnecting {
                     HStack(spacing: 6) {

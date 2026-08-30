@@ -104,15 +104,23 @@ object PairingCredential {
      * does not stop being true because a later probe failed differently.
      *
      * Android-only: an e-ink reader has no camera, so the answer here is never
-     * "scan the pairing QR". It used to be "enter ws://…?token=… in Settings",
-     * which is a 32-hex-character string typed on an e-ink keyboard — advice
-     * technically possible and practically not taken. A pairing code is six
-     * digits, so that is what this points at now; see [PairingCodeClient].
+     * "scan the pairing QR". It has pointed at three different answers as each
+     * turned out to ask too much of the device — first "enter ws://…?token=…",
+     * a 32-hex-character string typed on an e-ink keyboard; then a six-digit
+     * pairing code, which is far better but only reachable once the daemon has
+     * been DISCOVERED, and a device reading this message may well be one mDNS
+     * never found.
+     *
+     * It now points at approval, which asks the device for nothing at all. That
+     * is sound precisely here: this string is shown because the daemon refused
+     * us, and a refusal is the moment it records the knock the operator
+     * approves. So by the time anyone reads this, the row is already waiting on
+     * the Mac.
      */
     fun disconnectedDetail(lastError: String?, unauthorizedEndpoints: Set<String>): String? {
         val endpoint = unauthorizedEndpoints.firstOrNull() ?: return lastError
-        return "Not paired with $endpoint — run \"agentdeck pair\" on your Mac, " +
-            "then enter the code in Settings"
+        return "Waiting for approval — open AgentDeck on your Mac, " +
+            "Devices › Pair Device, and approve $endpoint"
     }
 
     /** True for the `adb reverse` loopback endpoint, which needs no credential. */
