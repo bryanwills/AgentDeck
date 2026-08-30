@@ -61,13 +61,12 @@ export interface AgentCliDiagnosticReport {
 export type VersionCommandRunner = (command: string) => string;
 
 function runVersionCommand(command: string): string {
-  const isWin = process.platform === 'win32';
-  const loginShell = process.env.SHELL || '/bin/bash';
-  return isWin
-    ? execSync(command, { encoding: 'utf8', timeout: 5000, windowsHide: true }).trim()
-    : execSync(`${loginShell} -l -c '${command}'`, {
-        encoding: 'utf8', timeout: 5000, windowsHide: true,
-      }).trim();
+  // Use the caller's PATH. A non-interactive login shell may skip interactive
+  // startup files and reorder PATH, causing diagnostics to inspect a stale
+  // installation instead of the executable `agentdeck` was launched beside.
+  return execSync(command, {
+    encoding: 'utf8', timeout: 5000, windowsHide: true,
+  }).trim();
 }
 
 export function collectAgentCliDiagnosticReport(
