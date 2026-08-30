@@ -21,7 +21,7 @@
     "s2Note": "Desktop apps count too: macOS picks up Codex sessions from the ChatGPT app once Codex integration is registered — the terminal setup does it for you, and the App Store app asks in Settings.",
     "s3Title": "Fill your keys",
     "s3Body": "Drop the AgentDeck action on every key you want to use — it is the only action there is, and each key decides for itself what to show. The layout spreads over exactly the keys you placed: one per session first, then the answer keys, mode, stop and usage as room allows.",
-    "s3Note": "Before steps 1 and 2 are done, the middle key reads OFFLINE and the rest sit dim. That is the plugin working — it is telling you the daemon is the missing piece.",
+    "s3Note": "Before steps 1 and 2 are done, every key forms one dark OFFLINE card. That is the plugin working — it is telling you the daemon is the missing piece.",
     "thin": "AgentDeck is a thin client, like an OBS plugin: it draws what the local daemon reports and bundles no daemon of its own.",
     "copy": "Copy",
     "copied": "Copied",

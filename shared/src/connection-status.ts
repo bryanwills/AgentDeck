@@ -4,7 +4,8 @@
  *
  * Two device classes, two vocabularies:
  *
- * 1. Self-connecting clients (Apple app, Android app, ESP32 WiFi panels, TUI)
+ * 1. Self-connecting clients (Apple app, Android app, ESP32 WiFi panels —
+ *    including InkDeck — and TUI)
  *    own their link to the daemon: they discover via mDNS, connect, and
  *    auto-reconnect. They surface the *phase* they are actually in:
  *      - SEARCHING     "Searching for AgentDeck..."  (mDNS discovery, no target yet)
@@ -15,10 +16,18 @@
  *    "No AgentDeck found on this network".
  *
  * 2. Daemon-rendered passive displays (Stream Deck keys/encoders, D200H,
- *    Pixoo, Timebox, iDotMatrix, TRMNL) are painted BY the daemon/plugin and
+ *    Pixoo, Timebox, iDotMatrix) are painted BY the daemon/plugin and
  *    cannot search on their own. When the link is down they show a single
  *    terminal state: "OFFLINE" (optionally with the "Open AgentDeck"
  *    call-to-action subtitle). They never claim Connecting/Reconnecting.
+ *
+ * Across both classes the VISUAL grammar stays stable: near-black field on
+ * emissive/color displays (paper white on e-ink), muted cyan AgentDeck
+ * identity/accent where color exists, one large status line, and at most one quiet
+ * explanatory line. Tiny pixel displays may replace the words with the same
+ * static offline badge, but must keep the field dark and non-animated. A live
+ * daemon with an empty roster is a different state ("No active sessions") and
+ * must not be inferred from the aggregate `state:'disconnected'` value alone.
  *
  * Mirrors (update together — grep the literal when changing copy):
  *  - Swift:  apple/AgentDeck/UI/Monitor/ConnectionOverlay.swift (ConnectionLexicon)

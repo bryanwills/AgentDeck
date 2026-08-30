@@ -23,6 +23,7 @@ static bool isDimMode() { return smoothBrightness < 40; }
 
 // Forward declarations (definitions follow below)
 static inline int xyToIdx(int x, int y);
+static inline void setPixel(CRGB* leds, int x, int y, CRGB color);
 
 static bool isCodexAgentType(const char* agentType) {
     return agentType &&
@@ -61,26 +62,24 @@ static CRGB buildDisconnectMsg(char* out, size_t outSize) {
     return grey;
 }
 
-// Render a static, centered disconnect label with a gentle breathing pulse.
-// Disconnect is a benign idle state — the text stays put in a cool grey and
-// simply brightens/dims on a slow 4s sine so the display stays unobtrusive.
+// Render a static, centered disconnect label. A held OFFLINE frame should use
+// as little power as practical, and only amber awaiting is allowed to animate.
 static void renderDisconnectStatus(CRGB* leds, float animTime) {
+    (void)animTime;
     char msg[16];
     CRGB color = buildDisconnectMsg(msg, sizeof(msg));
     if (isDimMode()) {
         color = CRGB(color.r / 2, color.g / 2, color.b / 2);
     }
 
-    // Breathe: 4s period (π/2 rad/s), 70%–100% amplitude.
-    float breathe = 0.85f + 0.15f * sinf(animTime * 1.5708f);
-    CRGB pulseColor = CRGB(
-        (uint8_t)(color.r * breathe),
-        (uint8_t)(color.g * breathe),
-        (uint8_t)(color.b * breathe));
-
     int textW = MatrixFont::textWidth(msg);
     int x = (MATRIX_W - textW) / 2;
-    MatrixFont::drawScrollText(leds, msg, x, 1, pulseColor, MATRIX_W, MATRIX_H);
+    MatrixFont::drawScrollText(leds, msg, x, 1, color, MATRIX_W, MATRIX_H);
+    const CRGB accent = isDimMode() ? CRGB(0, 10, 13) : CRGB(0, 22, 28);
+    setPixel(leds, 0, 1, accent);
+    setPixel(leds, MATRIX_W - 1, 1, accent);
+    setPixel(leds, 0, MATRIX_H - 2, accent);
+    setPixel(leds, MATRIX_W - 1, MATRIX_H - 2, accent);
 }
 
 static inline int xyToIdx(int x, int y) {

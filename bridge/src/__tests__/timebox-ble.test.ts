@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { deviceId, type TimeboxDevice } from '../timebox/timebox-settings.js';
 import { renderFrame } from '../pixoo/pixoo-renderer.js';
+import { paintTimeboxOffline } from '../pixoo/micro-glyphs.js';
 import { State } from '../types.js';
 import type { SessionInfo } from '@agentdeck/shared/protocol';
 
@@ -67,6 +68,28 @@ describe('micro layout (Timebox 11×11)', () => {
     expect(pixel(buf, 0, 0)[1]).toBeGreaterThan(pixel(buf, 0, 0)[0]);
     expect(pixel(buf, 5, 0)[1]).toBeGreaterThan(pixel(buf, 5, 0)[0]);
     expect(pixel(buf, 10, 10)[1]).toBeGreaterThan(pixel(buf, 10, 10)[0]);
+  });
+
+  it('provides a static dark farewell badge for a stopped daemon', () => {
+    const badge = new Uint8Array(11 * 11 * 3);
+    paintTimeboxOffline(badge);
+    expect(pixel(badge, 0, 0)).toEqual([0, 48, 56]);
+    expect(pixel(badge, 5, 5)).toEqual([68, 88, 92]);
+    const lit = Array.from({ length: 121 }, (_, i) => {
+      const p = pixel(badge, i % 11, Math.floor(i / 11));
+      return p.some((v, channel) => v !== [2, 6, 10][channel]);
+    }).filter(Boolean).length;
+    expect(lit).toBeLessThan(50);
+  });
+
+  it('does not mistake a live empty roster for daemon offline', () => {
+    const empty = renderFrame(
+      { state: State.DISCONNECTED } as never, null, [], 1000, 11, 'micro',
+    );
+    const badge = new Uint8Array(11 * 11 * 3);
+    paintTimeboxOffline(badge);
+    expect(empty).not.toEqual(badge);
+    expect(pixel(empty, 5, 6)).not.toEqual([2, 6, 10]);
   });
 
   it('moves critical usage to a red perimeter rail without tinting identity', () => {

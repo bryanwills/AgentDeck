@@ -8,6 +8,7 @@
 #include "../../input/power_monitor.h"
 #include "../display.h"
 #include "../theme.h"
+#include "../widgets/connection_card.h"
 #include "../agent_label.h"
 #include "../terrarium/creature_glyphs_generated.h"
 #include "../../util/utf8.h"
@@ -522,21 +523,14 @@ static int carouselSlideDir(int idx, uint8_t count) {
 static void renderListBody(bool connected, uint8_t sessionCount) {
     if (!connected) {
         bool wifiUp = Net::wifiConnected();
-        lv_obj_t* l = makeLabel(s_body, &lv_font_montserrat_14, Theme::HUDDim,
-                                wifiUp ? "Searching for AgentDeck..."
-                                       : "No WiFi — provision over USB");
-        lv_obj_align(l, LV_ALIGN_CENTER, 0, -10);
-        char netline[64];
-        if (wifiUp) snprintf(netline, sizeof(netline), "WiFi ok " LV_SYMBOL_BULLET " %s", Net::wifiLocalIP());
-        else snprintf(netline, sizeof(netline), "agentdeck wifi-setup");
-        lv_obj_t* n = makeLabel(s_body, &lv_font_montserrat_12, Theme::HUDFaint, netline);
-        lv_obj_align(n, LV_ALIGN_CENTER, 0, 14);
+        ConnectionCard::render(
+            s_body, 320, 126, "OFFLINE",
+            wifiUp ? "Searching for AgentDeck..." : "No WiFi · connect USB");
         return;
     }
     if (sessionCount == 0) {
-        lv_obj_t* l = makeLabel(s_body, &lv_font_montserrat_14, Theme::HUDDim,
-                                "No active sessions");
-        lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
+        ConnectionCard::render(
+            s_body, 320, 126, "NO ACTIVE SESSIONS", "AgentDeck connected", true);
         return;
     }
 
@@ -1086,7 +1080,9 @@ void update(float dt) {
 
     // Body
     lv_obj_clean(s_body);
-    if (s_mode == Mode::SCRUB && haveDetail) {
+    if (!connected) {
+        renderListBody(false, 0);
+    } else if (s_mode == Mode::SCRUB && haveDetail) {
         renderScrubBody();
     } else if (s_mode == Mode::DETAIL && haveDetail) {
         renderDetailBody(detail);
@@ -1112,6 +1108,9 @@ void update(float dt) {
     } else if (flashOn) {
         lv_label_set_text(s_footer, s_flashText);
         lv_obj_set_style_text_color(s_footer, lv_color_hex(Theme::StatusGreen), 0);
+    } else if (!connected) {
+        lv_label_set_text(s_footer, "auto-retrying " LV_SYMBOL_BULLET " USB or Wi-Fi");
+        lv_obj_set_style_text_color(s_footer, lv_color_hex(Theme::HUDFaint), 0);
     } else {
         // Hold-to-talk lives on the encoder and only at list level — without
         // this hint the mic is undiscoverable (the listening banner only

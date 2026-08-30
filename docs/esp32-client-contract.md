@@ -109,6 +109,8 @@ route to a board; a client that never emits it never appears on the dashboard. F
 | `otaSupported`, `otaSlotCount`, `otaSlotSize`, `otaFreeSketchSpace`, `otaReason` | OTA capability. `otaReason` only when unsupported. |
 | `timelineCount`, `sessionCount`, `usageFiveH`, `processingCount` | Debug aids — let a host-side probe (`daemon /devices`) distinguish "data never parsed" from "render gating" without stealing the serial port. |
 | `repaintCount`, `fullRefreshCount` | Optional e-ink observability counters. Both are monotonic since boot; `repaintCount` advances only when physical panel I/O starts after content/rate gating, and `fullRefreshCount` is its full-window subset. Both daemons expose them through USB-serial and WiFi registrations. |
+| `touchReady`, `touchDownSamples`, `touchGestures`, `touchLastX`, `touchLastY`, `touchMaxX`, `touchMaxY` | Optional touch initialization, activity, and coordinate-space diagnostics. A board adds `touch` to `capabilities` only when `touchReady` is true. |
+| `touchAddress`, `touchI2cDeviceCount`, `touchRtcSeen` | Optional EPD47 boot-probe diagnostics. `touchAddress` is the responding supported controller (GT911 0x14/0x5D or legacy 0x5A), zero means none; device count and RTC presence distinguish a dead I2C bus from an absent touch controller. |
 
 ### Command frames (steering — optional)
 

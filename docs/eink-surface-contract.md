@@ -84,24 +84,31 @@ mode.
 
 ## 5. Board binding and invariant controls
 
-| Board | Delivery mode | Deep-sleep wake | PTT | Escape, identical on every face |
+| Board | Delivery mode | Deep-sleep wake | PTT | Physical controls |
 |---|---|---|---|---|
-| InkDeck / Seeed TRMNL 7.5 | **Push**; USB-powered and continuously reachable | Not used by current firmware | None (no microphone) | `KEY2` / GPIO3 → `GLANCE`; `KEY1` remains the primary/page control |
-| RockBase NM-EPD-420 | **Pull** by default; explicit tethered configuration may promote it to push | `BOOT` / GPIO0 | `BOOT` hold, only after a wake tap has been released and audio is ready | `USER` / GPIO45 → `GLANCE`; it cannot wake the ESP32-S3 from deep sleep |
-| LilyGo T5 ePaper S3 / EPD47 | **Pull** | User button / GPIO21; `BOOT` / GPIO0 is recovery fallback. Touch IRQ GPIO47 is not a wake source without a hardware reroute. | None (no onboard microphone) | User button / GPIO21 → `GLANCE` while awake and wake-to-`GLANCE` while asleep |
+| InkDeck / Seeed TRMNL 7.5 | **Push**; USB-powered and continuously reachable | Not used by current firmware | None (no microphone) | `KEY1` cycles durable pages; `KEY2` returns to the live AgentDeck board |
+| RockBase NM-EPD-420 | **Pull** by default; explicit tethered configuration may promote it to push | `BOOT` / GPIO0 | `BOOT` hold remains reserved until the ES8311 capture path is enabled | Home: `BOOT` opens/pages, `USER` returns home. Decision: `BOOT` advances the highlighted option; `USER` selects, then confirms it. |
+| LilyGo T5 ePaper S3 / EPD47 | **Pull** | User button / GPIO21; `BOOT` / GPIO0 is recovery fallback. Touch IRQ GPIO47 is not a wake source without a hardware reroute. | None (no onboard microphone) | Detected touch selects tabs/options. If touch is unavailable, GPIO21 cycles `FOCUS → QUEUE → LIMITS`; every page transition uses a clearing full refresh. |
 
 On pull boards, a physical primary/wake action starts the eight-minute
 interactive lease. Outside that lease, `DECISION` and `ANSWER` are ineligible;
 loss of the daemon selects the static `ROSTER` fallback. The current NM build
 reserves a fresh `BOOT` hold for PTT but does not yet enable the ES8311 capture
-driver, so the allocation is stable before the audio path lands rather than
-being borrowed for a conflicting escape action.
+driver. Until capture lands, the retained footer documents only implemented
+short-press controls and does not advertise a non-working talk action.
+
+EPD47 specializes `GLANCE` into three touch tabs without changing the face
+priority contract: no active durable work selects `LIMITS`, one attention or
+processing session selects `FOCUS`, and two or more select `QUEUE`. A tab tap
+holds that page for eight minutes; expiry returns to the automatic selection.
+The controller is advertised as a `touch` capability only after a successful
+boot probe. GPIO21 becomes a deterministic tab-cycle fallback when touch is absent.
 
 The NM audio path is deliberately half-duplex at the product level: codec and
 speaker amplifier stay disabled during capture, then may be enabled for a short
 confirmation cue after capture. Printed `ANSWER` is the response; speech output
-is not required. The wake press never becomes accidental PTT: release completes
-wake, and a fresh hold starts capture.
+is not required. A future wake/hold implementation must still separate the wake
+release from a fresh capture hold.
 
 ## 6. Evaluation telemetry
 

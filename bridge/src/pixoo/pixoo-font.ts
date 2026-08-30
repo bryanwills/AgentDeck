@@ -21,7 +21,9 @@ const GLYPHS: Record<string, number[]> = {
   'K': [0b101, 0b110, 0b100, 0b110, 0b101],
   'L': [0b100, 0b100, 0b100, 0b100, 0b111],
   'M': [0b101, 0b111, 0b111, 0b101, 0b101],
-  'N': [0b101, 0b111, 0b111, 0b101, 0b101],
+  // A diagonal, not the old M-shaped double-join. At 3px wide the fully
+  // connected form makes N byte-identical to M and reads as a smudged block.
+  'N': [0b101, 0b110, 0b101, 0b011, 0b101],
   'O': [0b010, 0b101, 0b101, 0b101, 0b010],
   'P': [0b110, 0b101, 0b110, 0b100, 0b100],
   'Q': [0b010, 0b101, 0b101, 0b110, 0b011],

@@ -17,6 +17,9 @@
 #include "../input/power_monitor.h"
 #include "../camera/photo_capture.h"
 #endif
+#if defined(BOARD_LILYGO_EPD47)
+#include "../input/touch_strip.h"
+#endif
 #if !defined(BOARD_LED8X32) && !defined(BOARD_EINK_SURFACE)
 #include "../ui/screens/splash.h"
 #endif
@@ -169,6 +172,24 @@ static void sendDeviceInfoSerial() {
             resp["usbPowered"] = ps.usbPowered;
         } else {
             resp["batteryDiag"] = ps.gaugeErr;  // Wire error code — see power_monitor.h
+        }
+    }
+#endif
+#if defined(BOARD_LILYGO_EPD47)
+    {
+        resp["touchReady"] = Input::touchReady();
+        resp["touchDownSamples"] = Input::touchDownSamples();
+        resp["touchGestures"] = Input::touchGestures();
+        resp["touchLastX"] = Input::touchLastX();
+        resp["touchLastY"] = Input::touchLastY();
+        resp["touchMaxX"] = Input::touchMaxX();
+        resp["touchMaxY"] = Input::touchMaxY();
+        resp["touchAddress"] = Input::touchAddress();
+        resp["touchI2cDeviceCount"] = Input::touchI2cDeviceCount();
+        resp["touchRtcSeen"] = Input::touchRtcSeen();
+        if (Input::touchReady()) {
+            JsonArray caps = resp["capabilities"].to<JsonArray>();
+            caps.add("touch");
         }
     }
 #endif

@@ -19,6 +19,25 @@ function connectedStore(): StateStore {
 }
 
 describe('D200H StateStore session isolation', () => {
+  it('keeps daemon transport separate from an empty disconnected aggregate state', () => {
+    const store = new StateStore();
+    store.setConnected(true);
+    store.apply({ type: 'state_update', state: State.DISCONNECTED } as BridgeEvent);
+    store.apply({ type: 'sessions_list', sessions: [] });
+    expect(store.toLayoutInput()).toMatchObject({
+      state: State.DISCONNECTED,
+      daemonConnected: true,
+      allSessions: [],
+    });
+
+    store.setConnected(false);
+    expect(store.toLayoutInput()).toMatchObject({
+      state: 'DISCONNECTED',
+      daemonConnected: false,
+      allSessions: [],
+    });
+  });
+
   it('does not use the global OpenClaw model while Claude focus is pending', () => {
     const store = connectedStore();
     store.apply({

@@ -303,7 +303,9 @@ final class PixooRenderer {
         "F": [0b111, 0b100, 0b110, 0b100, 0b100],
         "L": [0b100, 0b100, 0b100, 0b100, 0b111],
         "I": [0b111, 0b010, 0b010, 0b010, 0b111],
-        "N": [0b101, 0b111, 0b111, 0b101, 0b101],
+        // Keep the diagonal openings: the former double-join was identical to
+        // M at 3×5 and made OFFLINE's N read as a smudged block.
+        "N": [0b101, 0b110, 0b101, 0b011, 0b101],
         "E": [0b111, 0b100, 0b110, 0b100, 0b111],
     ]
 
@@ -379,6 +381,7 @@ final class PixooRenderer {
         let caustic: RGB = (0x1C, 0x36, 0x50)
         let dataParticle: RGB = (0x70, 0xB0, 0xFF)
         let dataParticleGreen: RGB = (0x50, 0xF0, 0x90)
+        let tankWall: RGB = (0x06, 0x0A, 0x10)
         let stateIdle: RGB = (0x22, 0xC5, 0x5E)
         let stateProcessing: RGB = (0x3B, 0x82, 0xF6)
         let stateAwaiting: RGB = (0xF5, 0x9E, 0x0B)
@@ -789,12 +792,25 @@ final class PixooRenderer {
         return Data(out)
     }
 
-    /// Static black frame with a centered grey "OFFLINE" label. Mirrors
+    /// Static dark frame with a centered grey "OFFLINE" label and sparse cyan
+    /// corner rails. Mirrors
     /// `renderDisconnectedFrame()` in bridge/src/pixoo/pixoo-renderer.ts so
     /// Pixoo stops displaying stale creature frames the moment the Swift
     /// daemon goes away.
     func renderDisconnectedFrame() -> Data {
         var buf = [UInt8](repeating: 0, count: Self.width * Self.height * 3)
+        for i in 0..<(Self.width * Self.height) {
+            buf[i * 3] = Self.colors.tankWall.0
+            buf[i * 3 + 1] = Self.colors.tankWall.1
+            buf[i * 3 + 2] = Self.colors.tankWall.2
+        }
+        let accent: RGB = (0, 48, 56)
+        for i in 0..<9 {
+            setPixel(&buf, 4 + i, 4, accent); setPixel(&buf, 4, 4 + i, accent)
+            setPixel(&buf, 51 + i, 4, accent); setPixel(&buf, 59, 4 + i, accent)
+            setPixel(&buf, 4 + i, 59, accent); setPixel(&buf, 4, 51 + i, accent)
+            setPixel(&buf, 51 + i, 59, accent); setPixel(&buf, 59, 51 + i, accent)
+        }
         let text = "OFFLINE"
         // Glyphs are 3px wide + 1px gap; drawText is right-aligned, so compute
         // a rightX that centers the 27px text on the 64px canvas (cols 18..44).

@@ -1541,9 +1541,19 @@ export function renderFrame(
 
 // ===== Disconnected Frame =====
 
-/** Render a static black frame with centered grey "OFFLINE" text. */
+/** Render the static, dark passive-display OFFLINE card. */
 export function renderDisconnectedFrame(): Uint8Array {
-  const buf = new Uint8Array(64 * 64 * 3); // black
+  const buf = new Uint8Array(64 * 64 * 3);
+  for (let i = 0; i < 64 * 64; i++) buf.set(COLORS.tankWall, i * 3);
+  const accent: RGB = [0, 48, 56];
+  // Sparse corner rails survive 64→32 reduction while keeping almost every
+  // LED at the low-power background level.
+  for (let i = 0; i < 9; i++) {
+    setPixel(buf, 4 + i, 4, accent); setPixel(buf, 4, 4 + i, accent);
+    setPixel(buf, 51 + i, 4, accent); setPixel(buf, 59, 4 + i, accent);
+    setPixel(buf, 4 + i, 59, accent); setPixel(buf, 4, 51 + i, accent);
+    setPixel(buf, 51 + i, 59, accent); setPixel(buf, 59, 51 + i, accent);
+  }
   drawTextCentered(buf, 29, PASSIVE_OFFLINE_LABEL, '#555555');
   return buf;
 }

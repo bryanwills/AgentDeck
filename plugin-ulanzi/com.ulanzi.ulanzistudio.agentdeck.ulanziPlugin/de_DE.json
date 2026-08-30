@@ -21,7 +21,7 @@
     "s2Note": "Desktop-Apps zählen ebenfalls: macOS erkennt Codex-Sitzungen aus der ChatGPT-App, sobald die Codex-Integration registriert ist — die Terminal-Einrichtung erledigt das, die App Store-App fragt in den Einstellungen danach.",
     "s3Title": "Tasten belegen",
     "s3Body": "Zieh die AgentDeck-Aktion auf jede Taste, die du nutzen willst — es ist die einzige Aktion, und jede Taste entscheidet selbst, was sie zeigt. Das Layout verteilt sich über genau die Tasten, die du belegt hast: zuerst eine pro Sitzung, dann Antwort-Tasten, Modus, Stopp und Verbrauch, soweit Platz ist.",
-    "s3Note": "Solange Schritt 1 und 2 fehlen, zeigt die mittlere Taste OFFLINE und der Rest bleibt gedimmt. Genau so soll es sein — das Plugin sagt dir damit, dass der Daemon fehlt.",
+    "s3Note": "Solange Schritt 1 und 2 fehlen, bilden alle Tasten eine dunkle OFFLINE-Karte. Genau so soll es sein — das Plugin sagt dir damit, dass der Daemon fehlt.",
     "thin": "AgentDeck ist ein Thin Client, wie ein OBS-Plugin: es zeichnet, was der lokale Daemon meldet, und bringt keinen eigenen Daemon mit.",
     "copy": "Kopieren",
     "copied": "Kopiert",

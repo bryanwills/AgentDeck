@@ -484,7 +484,7 @@ struct SettingsScreen: View {
                 }
 
                 if let error = stateHolder.connection.lastError {
-                    Text(error)
+                    Text("Connection error · \(error)")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(TerrariumHUD.ledRed)
                 }

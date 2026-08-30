@@ -67,21 +67,18 @@ describe('usage tiles — usageKnown tri-state', () => {
 });
 
 describe('buildSessionDeck — daemon offline', () => {
-  it('renders the OFFLINE hero on the center key for a DISCONNECTED state', () => {
+  it('renders one deck-spanning OFFLINE card for a disconnected daemon', () => {
     const pos = positions(13);
-    const deck = buildSessionDeck({ state: 'DISCONNECTED', allSessions: [] }, { mode: 'list' }, pos);
+    const deck = buildSessionDeck(
+      { state: 'DISCONNECTED', daemonConnected: false, allSessions: [] },
+      { mode: 'list' },
+      pos,
+    );
 
     const heroCells = [...deck.values()].filter((c) => c.svg.includes('OFFLINE'));
-    expect(heroCells).toHaveLength(1);
-
-    // Hero sits at the center index of the sorted positions, not the corner.
-    const sorted = [...deck.keys()].sort((a, b) => {
-      const [ac, ar] = a.split('_').map(Number);
-      const [bc, br] = b.split('_').map(Number);
-      return ar !== br ? ar - br : ac - bc;
-    });
-    const heroPos = [...deck.entries()].find(([, c]) => c.svg.includes('OFFLINE'))![0];
-    expect(heroPos).toBe(sorted[Math.floor(sorted.length / 2)]);
+    expect(heroCells).toHaveLength(pos.length);
+    expect(deck.get('0_0')?.svg).toContain('translate(0 0)');
+    expect(deck.get('4_1')?.svg).toContain('translate(-576 -144)');
   });
 
   it('makes EVERY key launch the companion app while offline', () => {
@@ -93,11 +90,19 @@ describe('buildSessionDeck — daemon offline', () => {
   });
 
   it('does not show OFFLINE / launch when the daemon is connected', () => {
-    const deck = buildSessionDeck({ state: 'IDLE', allSessions: [] }, { mode: 'list' }, positions(5));
+    const deck = buildSessionDeck(
+      { state: 'disconnected', daemonConnected: true, allSessions: [] },
+      { mode: 'list' },
+      positions(5),
+    );
     for (const cell of deck.values()) {
       expect(cell.svg).not.toContain('OFFLINE');
       expect(cell.action).not.toEqual({ kind: 'launch' });
     }
+    const svg = [...deck.values()].map((cell) => cell.svg).join('\n');
+    expect(svg).toContain('HUB READY');
+    expect(svg).toContain('NO SESSION');
+    expect(svg).toContain('AgentDeck');
   });
 
   // Regression: the daemon reports state:'disconnected' whenever no managed /

@@ -38,7 +38,7 @@
 // fails CI when the firmware drifts ahead of this mirror. Update this view and
 // re-pin whenever the firmware layout changes.
 //
-// SYNC-HASH esp32/src/ui/eink/eink_display.cpp 4203816f0ffb7bc1fccf5495999159d35e6abe4c
+// SYNC-HASH esp32/src/ui/eink/eink_display.cpp b3875c26a96fdaebdeccc0fdc33bb6b203c5d54a
 // SYNC-HASH esp32/src/ui/eink/eink_dashboard_layout.h 9179d41777d6e2caff02735607ad7ca210de8bb8
 
 import SwiftUI
@@ -207,16 +207,19 @@ struct InkDeckPreview: View {
         return Group {
             if sessions.isEmpty {
                 // Two distinct empty states, like the firmware: disconnected →
-                // drawSearching ("searching for daemon…"); connected with no
+                // terminal OFFLINE card + quiet retry phase; connected with no
                 // sessions → drawSessionGrid's rowCount==0 branch ("no active
                 // sessions" + workspace hint). Conflating them made a healthy
                 // idle daemon read as broken.
                 VStack(spacing: 8) {
                     AgentDeckLogo(size: 44, color: ink.opacity(0.7))
                     if selection.state == .disconnected {
-                        Text("searching for daemon…")
-                            .font(.system(size: 10))
-                            .foregroundStyle(ink.opacity(0.6))
+                        Text("OFFLINE")
+                            .font(.system(size: 14, weight: .black, design: .monospaced))
+                            .foregroundStyle(ink.opacity(0.88))
+                        Text("Searching for AgentDeck…")
+                            .font(.system(size: 9))
+                            .foregroundStyle(ink.opacity(0.58))
                     } else {
                         Text("no active sessions")
                             .font(.system(size: 12, weight: .bold))

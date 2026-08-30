@@ -173,6 +173,14 @@ bool SimScenes::apply(const char* name) {
     g_state.dataReceived = false;   // pre-connection: idle aquarium, no creatures
     return true;
   }
+  if (std::strcmp(name, "offline") == 0) {
+    base(CreatureState::FLOATING);
+    g_state.wsConnected = false;
+    g_state.dataReceived = true;  // previously connected, daemon now absent
+    g_state.lastMessageMs = 1;
+    g_state.sessionCount = 0;
+    return true;
+  }
   if (std::strcmp(name, "idle") == 0) {
     base(CreatureState::FLOATING);
     addSession("claude-code", "idle", "AgentDeck");
@@ -290,6 +298,10 @@ bool SimScenes::apply(const char* name) {
     addSession("kiro-ide", "idle", "design-system");
     setStr(g_state.sessions[0].question, sizeof(g_state.sessions[0].question),
            "Allow the firmware flash on the connected IPS 10.1 panel?");
+    g_state.optionCount = 3;
+    setStr(g_state.options[0].label, sizeof(g_state.options[0].label), "Allow once");
+    setStr(g_state.options[1].label, sizeof(g_state.options[1].label), "Always allow");
+    setStr(g_state.options[2].label, sizeof(g_state.options[2].label), "Deny");
     setStr(g_state.sessions[1].lastEventText, sizeof(g_state.sessions[1].lastEventText),
            "Building the adaptive ESP32 dashboard");
     setStr(g_state.sessions[2].lastEventText, sizeof(g_state.sessions[2].lastEventText),
@@ -299,6 +311,12 @@ bool SimScenes::apply(const char* name) {
   if (std::strcmp(name, "permission") == 0) {
     base(CreatureState::ASKING);
     addSession("claude-code", "awaiting_permission", "AgentDeck");
+    setStr(g_state.sessions[0].question, sizeof(g_state.sessions[0].question),
+           "Allow AgentDeck to flash the connected display?");
+    g_state.optionCount = 3;
+    setStr(g_state.options[0].label, sizeof(g_state.options[0].label), "Allow once");
+    setStr(g_state.options[1].label, sizeof(g_state.options[1].label), "Always allow");
+    setStr(g_state.options[2].label, sizeof(g_state.options[2].label), "Deny");
     g_state.state = AgentState::AWAITING_PERMISSION;
     return true;
   }

@@ -481,7 +481,7 @@ private fun ConnectionOverlay(
             // Error message
             if (lastError != null && connectionStatus == ConnectionStatus.DISCONNECTED) {
                 Text(
-                    text = lastError,
+                    text = "Connection error · $lastError",
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     color = AgentDeckColors.Red,
                     textAlign = TextAlign.Center,

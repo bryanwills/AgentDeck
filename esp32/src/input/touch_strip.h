@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-// CST226SE touch (via SensorLib). The wide strip uses coordinates for direct
-// tab/action targets and horizontal motion for page swipes.
+// SensorLib touch gesture layer. T-Display Pro uses CST226SE; EPD47 uses
+// GT911. Both expose display-oriented coordinates for direct targets/swipes.
 
 namespace Input {
 
@@ -17,6 +17,11 @@ struct TouchEvent {
 
 bool touchInit();
 bool touchReady();
+/** EPD47 boot probe diagnostics. Address is 0 when no supported controller
+ * answered; the count includes every I2C peripheral seen on the touch bus. */
+uint8_t touchAddress();
+uint8_t touchI2cDeviceCount();
+bool touchRtcSeen();
 TouchEvent touchPoll(uint32_t nowMs);
 
 /**

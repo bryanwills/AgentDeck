@@ -45,9 +45,25 @@ void epd_draw_grayscale_image(LilyEpdRect area, uint8_t* data);
 #include "ui/terrarium/creature_glyphs_generated.h"
 #include "ui/agent_label.h"
 #include "ui/eink/eink_dashboard_layout.h"
+#include "ui/eink/epd47_page_policy.h"
 #include "util/usage_format.h"
 #include "util/utf8.h"
 #include "util/memory.h"
+#if defined(BOARD_LILYGO_EPD47)
+#include "input/touch_strip.h"
+#endif
+
+#if defined(BOARD_LILYGO_EPD47) || defined(BOARD_SIM_EPD47)
+#define AGENTDECK_EPD47_UI 1
+#endif
+
+#if defined(BOARD_NM_EPD_420) || defined(BOARD_SIM_NM)
+#define AGENTDECK_NM_UI 1
+#endif
+
+#if defined(BOARD_INKDECK) && !defined(BOARD_SIM_PULL)
+#define AGENTDECK_INKDECK_UI 1
+#endif
 
 namespace {
 
@@ -167,6 +183,7 @@ constexpr int16_t W = SCREEN_W, H = SCREEN_H;
 constexpr uint8_t MAX_ROWS = 10;   // matches the sessions_list cap
 
 struct RowSnap {
+    char id[32];
     char name[40];
     char agentType[16];
     char state[20];
@@ -226,6 +243,7 @@ void snapshot(Snap& s) {
     for (uint8_t i = 0; i < s.rowCount; i++) {
         const SessionInfo& src = g_state.sessions[i];
         RowSnap& dst = s.rows[i];
+        strncpy(dst.id, src.id, sizeof(dst.id) - 1);
         strncpy(dst.name, src.projectName, sizeof(dst.name) - 1);
         strncpy(dst.agentType, src.agentType, sizeof(dst.agentType) - 1);
         strncpy(dst.state, src.state, sizeof(dst.state) - 1);
@@ -785,6 +803,12 @@ void drawBrandHeader(const Snap& s, const AgentDeckEink::Layout& layout) {
         textRight(chipX - 14, 38, cnt, countFont);
     }
 
+#if defined(AGENTDECK_INKDECK_UI)
+    // These are the only two front-panel actions. Keep them visible on every
+    // dashboard face instead of relying on a manual or hidden button cycle.
+    textAt(286, 58, "KEY1 VIEW  |  KEY2 HOME", CLASSIC_FONT);
+#endif
+
     // Double rule (print-style)
     display.fillRect(0, 62, W, 2, GxEPD_BLACK);
     display.drawFastHLine(0, 66, W, GxEPD_BLACK);
@@ -1059,6 +1083,14 @@ void drawSessionCard(const Snap& s, const RowSnap& r, bool firstAwaiting,
             smartFitText(af, sizeof(af), r.work, maxTextW, &FreeSans9pt7b);
             smartTextAt(tx, dy, af, &FreeSans9pt7b);
         }
+    } else if (dy < y + h - 8) {
+        const auto kind = AgentDeckEink::classifyStatus(r.state);
+        const char* fallback = kind == AgentDeckEink::StatusKind::Processing
+            ? "Working. Waiting for the next update."
+            : (kind == AgentDeckEink::StatusKind::Idle
+                ? "Ready for the next request."
+                : "Session is currently unavailable.");
+        drawWrapped2(tx, dy, dy + 20, maxTextW, fallback, &FreeSans9pt7b);
     }
 
     // Model tag bottom-right on every card — narrow cards drop to the
@@ -1116,6 +1148,26 @@ enum class PaperFace : uint8_t { Glance, Decision, Answer, Digest, Roster };
 
 PaperFace renderFace = PaperFace::Glance;
 PaperFace manualFace = PaperFace::Glance;
+#if defined(AGENTDECK_EPD47_UI)
+AgentDeckEpd47::Page epd47Page = AgentDeckEpd47::Page::Limits;
+uint32_t epd47PageHoldUntilMs = 0;
+AgentDeckEpd47::Page lastPhysicalEpd47Page = AgentDeckEpd47::Page::Limits;
+bool physicalEpd47PageReady = false;
+uint8_t epd47DecisionSelection = 0;
+uint32_t epd47SelectionDecisionHash = 0;
+#if defined(BOARD_LILYGO_EPD47)
+uint32_t epd47DecisionButtonDownMs = 0;
+bool epd47DecisionButtonTracking = false;
+#endif
+#endif
+#if defined(AGENTDECK_NM_UI)
+uint8_t nmDecisionSelection = 0;
+uint32_t nmSelectionDecisionHash = 0;
+#endif
+#if defined(AGENTDECK_INKDECK_UI)
+uint8_t inkDecisionSelection = 0;
+uint32_t inkSelectionDecisionHash = 0;
+#endif
 #if defined(BOARD_NM_EPD_420)
 // Used only to bypass the five-minute content gate for meaningful face/link
 // transitions. It does not enable any partial waveform.
@@ -1130,6 +1182,18 @@ uint32_t lastAnswerHash = 0;
 bool sawProcessing = false;
 
 constexpr uint32_t FACE_HOLD_MS = 8UL * 60UL * 1000UL;
+
+#if defined(AGENTDECK_EPD47_UI)
+bool epd47TouchAvailable() {
+#if defined(BOARD_LILYGO_EPD47)
+    return Input::touchReady();
+#else
+    // The physical-size preview represents the currently installed unit,
+    // whose controller does not answer the same probe as production.
+    return false;
+#endif
+}
+#endif
 
 bool interactiveLeaseActive(uint32_t now) {
 #if defined(BOARD_INKDECK) && !defined(BOARD_SIM_PULL)
@@ -1186,6 +1250,17 @@ uint32_t decisionHash(const Snap& s) {
     return h;
 }
 
+bool sendDecisionSelection(const Snap& s, uint8_t selection) {
+    const int awaiting = primarySession(s, AgentDeckEink::StatusKind::Attention);
+    if (awaiting < 0 || s.optionCount == 0 || selection >= s.optionCount) return false;
+    char command[112];
+    snprintf(command, sizeof(command),
+             "{\"type\":\"select_option\",\"index\":%u,\"sessionId\":\"%s\"}",
+             (unsigned)selection, s.rows[awaiting].id);
+    Net::queueOutbound(command);
+    return true;
+}
+
 uint32_t answerHash(const Snap& s) {
     int i = primarySession(s, AgentDeckEink::StatusKind::Idle);
     if (i < 0) return 0;
@@ -1200,6 +1275,9 @@ uint32_t paperHash(const Snap& s, PaperFace face) {
     h = fnv(h, &face, sizeof(face));
     h = fnv(h, &s.bridgeConnected, sizeof(s.bridgeConnected));
     h = fnv(h, &s.rowCount, sizeof(s.rowCount));
+#if defined(AGENTDECK_EPD47_UI)
+    if (face == PaperFace::Glance) h = fnv(h, &epd47Page, sizeof(epd47Page));
+#endif
     if (face == PaperFace::Decision) return fnv(h, &lastDecisionHash, sizeof(lastDecisionHash));
     if (face == PaperFace::Answer) return fnv(h, &lastAnswerHash, sizeof(lastAnswerHash));
     if (face == PaperFace::Roster) return contentHash(s);
@@ -1269,16 +1347,14 @@ void drawPaperHeader(const Snap& s, PaperFace face) {
 #endif
     display.fillRect(0, 0, W, W <= 420 ? 7 : 9, accent);
     drawAgentDeckMark(pad, 10, W <= 420 ? 30 : 40);
+    // GLANCE is an internal arbitration state, not product-facing navigation.
+    // The resting page keeps the product name; alternate pages name the
+    // durable thing the user deliberately opened.
+    const char* title = face == PaperFace::Glance ? "AGENTDECK" : faceName(face);
     textAt(pad + (W <= 420 ? 40 : 54), W <= 420 ? 36 : 46,
-           faceName(face), W <= 420 ? &FreeSansBold12pt7b : &FreeSansBold18pt7b);
-    const char* mode =
-#if defined(BOARD_INKDECK) && !defined(BOARD_SIM_PULL)
-        "PUSH";
-#else
-        "PULL";
-#endif
+           title, W <= 420 ? &FreeSansBold12pt7b : &FreeSansBold18pt7b);
     char status[40];
-    snprintf(status, sizeof(status), "%s / %s", mode, s.bridgeConnected ? "LINK" : "OFFLINE");
+    snprintf(status, sizeof(status), "%s", s.bridgeConnected ? "SYNCED" : "OFFLINE");
     textRight(W - pad, W <= 420 ? 34 : 42, status,
               W <= 420 ? CLASSIC_FONT : &FreeSansBold9pt7b);
     display.drawFastHLine(pad, headerH, W - pad * 2, GxEPD_BLACK);
@@ -1296,6 +1372,227 @@ void drawMiniUsage(int16_t x, int16_t y, int16_t w, const char* label, float pct
     char value[10]; snprintf(value, sizeof(value), pct >= 0 ? "%d%%" : "--", (int)pct);
     textRight(x + w, y + 10, value, CLASSIC_FONT);
 }
+
+#if defined(AGENTDECK_EPD47_UI)
+void epd47Counts(const Snap& s, uint8_t& attention, uint8_t& processing) {
+    attention = 0;
+    processing = 0;
+    for (uint8_t i = 0; i < s.rowCount; i++) {
+        const auto kind = AgentDeckEink::classifyStatus(s.rows[i].state);
+        if (kind == AgentDeckEink::StatusKind::Attention) attention++;
+        else if (kind == AgentDeckEink::StatusKind::Processing) processing++;
+    }
+}
+
+AgentDeckEpd47::Page epd47AutomaticPage(const Snap& s) {
+    uint8_t attention, processing;
+    epd47Counts(s, attention, processing);
+    return AgentDeckEpd47::automaticPage(attention, processing);
+}
+
+void drawEp47Chrome(const Snap& s, AgentDeckEpd47::Page selected) {
+    constexpr int16_t tabX = 278;
+    constexpr int16_t tabW = 142;
+    constexpr int16_t headerH = 76;
+    display.fillRect(0, 0, W, 8, GxEPD_BLACK);
+    drawAgentDeckMark(20, 14, 38);
+    textAt(72, 45, "AGENTDECK", &FreeSansBold18pt7b);
+
+    for (uint8_t i = 0; i < 3; i++) {
+        const auto page = static_cast<AgentDeckEpd47::Page>(i);
+        const int16_t x = tabX + i * tabW;
+        const char* label = AgentDeckEpd47::pageName(page);
+        const int16_t tw = textWidth(label, &FreeSansBold9pt7b);
+        textAt(x + (tabW - tw) / 2, 42, label, &FreeSansBold9pt7b);
+        if (page == selected) display.fillRect(x + 14, 58, tabW - 28, 6, GxEPD_BLACK);
+    }
+
+    char link[28];
+    snprintf(link, sizeof(link), "%s", s.bridgeConnected ? "SYNCED" : "OFFLINE");
+    textRight(W - 20, 42, link, &FreeSansBold9pt7b);
+    display.drawFastHLine(20, headerH, W - 40, GxEPD_BLACK);
+}
+
+void drawEp47Footer(const Snap& s, const char* automaticReason) {
+    constexpr int16_t y = 492;
+    display.drawFastHLine(20, y - 14, W - 40, GxEPD_BLACK);
+    const bool held = epd47PageHoldUntilMs != 0 &&
+                      (int32_t)(epd47PageHoldUntilMs - millis()) > 0;
+    char mode[84];
+    if (held) {
+        const uint32_t leftMin = (epd47PageHoldUntilMs - millis() + 59999UL) / 60000UL;
+        snprintf(mode, sizeof(mode), "HELD / %lum  ·  %s READY",
+                 (unsigned long)leftMin,
+                 AgentDeckEpd47::pageName(epd47AutomaticPage(s)));
+    } else {
+        snprintf(mode, sizeof(mode), "AUTO  ·  %s", automaticReason);
+    }
+    textAt(20, y + 20, mode, &FreeSansBold9pt7b);
+    if (s.tickerCount > 0) {
+        char event[116];
+        smartFitText(event, sizeof(event), s.tickerText[0], 520, &FreeSans9pt7b);
+        smartTextAt(250, y + 20, event, &FreeSans9pt7b);
+    }
+    if (!epd47TouchAvailable()) {
+        textRight(W - 20, y + 20, "GPIO21  NEXT", CLASSIC_FONT);
+    } else if (s.agPlan[0]) {
+        textRight(W - 20, y + 20, s.agPlan, CLASSIC_FONT);
+    }
+}
+
+void drawEp47Window(int16_t x, int16_t y, int16_t w, const char* label,
+                    float pct, const char* reset) {
+    textAt(x, y + 18, label, &FreeSansBold12pt7b);
+    char value[16];
+    snprintf(value, sizeof(value), pct >= 0 ? "%d%% USED" : "--", (int)pct);
+    textRight(x + w, y + 18, value, &FreeSansBold12pt7b);
+    display.drawRect(x, y + 34, w, 22, GxEPD_BLACK);
+    if (pct >= 0) {
+        const float bounded = min(100.0f, max(0.0f, pct));
+        const int16_t fill = (int16_t)((w - 6) * bounded / 100.0f);
+        display.fillRect(x + 3, y + 37, fill, 16, GxEPD_BLACK);
+    }
+    char resetLine[48];
+    snprintf(resetLine, sizeof(resetLine), "RESET  %s", reset && reset[0] ? reset : "waiting");
+    textAt(x, y + 78, resetLine, &FreeSans9pt7b);
+}
+
+void drawEp47ProviderCard(int16_t x, const char* agentType, const char* name,
+                          const char* plan, float first, const char* firstReset,
+                          float second, const char* secondReset, bool stale) {
+    constexpr int16_t y = 104;
+    constexpr int16_t w = 444;
+    constexpr int16_t h = 356;
+    display.drawRoundRect(x, y, w, h, 8, GxEPD_BLACK);
+    drawAgentGlyph(agentType, x + 24, y + 24, 54);
+    textAt(x + 96, y + 55, name, &FreeSansBold18pt7b);
+    if (plan && plan[0]) smartTextAt(x + 96, y + 80, plan, &FreeSans9pt7b);
+    if (stale) textRight(x + w - 22, y + 54, "STALE", CLASSIC_FONT);
+    display.drawFastHLine(x + 22, y + 102, w - 44, GxEPD_BLACK);
+    if (first < 0 && second < 0) {
+        textAt(x + 24, y + 178, "Waiting for usage data", &FreeSansBold12pt7b);
+        textAt(x + 24, y + 208, "AgentDeck will refresh this page when limits arrive.",
+               &FreeSans9pt7b);
+        return;
+    }
+    drawEp47Window(x + 24, y + 126, w - 48, "5H", first, firstReset);
+    drawEp47Window(x + 24, y + 238, w - 48, "7D", second, secondReset);
+}
+
+void drawEp47Limits(const Snap& s) {
+    drawEp47Chrome(s, AgentDeckEpd47::Page::Limits);
+    drawEp47ProviderCard(24, "claude-code", "CLAUDE", s.claudePlan,
+                         s.fiveH, s.fiveReset, s.sevenD, s.sevenReset, s.usageStale);
+    drawEp47ProviderCard(492, "codex-cli", "CODEX", s.codexPlan,
+                         s.codexP, s.codexPReset, s.codexS, s.codexSReset, false);
+    drawEp47Footer(s, "NO ACTIVE WORK / LIMITS RESTING PAGE");
+}
+
+void drawEp47Focus(const Snap& s) {
+    drawEp47Chrome(s, AgentDeckEpd47::Page::Focus);
+    const int i = primarySession(s);
+    if (i < 0) {
+        drawAgentDeckMark(46, 148, 92);
+        textAt(172, 188, "QUIET PAPER", &FreeSansBold18pt7b);
+        textAt(172, 224, "No active work. LIMITS is the automatic resting page.",
+               &FreeSans9pt7b);
+        drawEp47Footer(s, "FOCUS HELD / NO ACTIVE WORK");
+        return;
+    }
+
+    const RowSnap& r = s.rows[i];
+    constexpr int16_t top = 112;
+    drawAgentGlyph(r.agentType, 34, top, 92);
+    char state[20]; stateLabel(r.state, state, sizeof(state));
+    textAt(154, top + 24, state, &FreeSansBold9pt7b);
+    char name[72]; smartFitText(name, sizeof(name), r.name[0] ? r.name : "AgentDeck",
+                                510, &FreeSansBold18pt7b);
+    smartTextAt(154, top + 66, name, &FreeSansBold18pt7b);
+    const bool awaiting = isAwaiting(r.state);
+    const char* body = awaiting
+        ? (r.question[0] ? r.question
+                         : (epd47TouchAvailable()
+                             ? "Decision waiting. Tap this card to open it."
+                             : "Decision waiting. Press GPIO21 to open it."))
+        : (r.work[0] ? r.work : (r.activity[0] ? r.activity : "Work is in progress."));
+    drawParagraph(154, top + 112, 520, 28, 5, body, &FreeSansBold12pt7b);
+    if (r.tool[0] && !awaiting) {
+        char tool[74]; smartFitText(tool, sizeof(tool), r.tool, 510, &FreeSans9pt7b);
+        smartTextAt(154, top + 272, tool, &FreeSans9pt7b);
+    }
+
+    display.drawFastVLine(712, 102, 344, GxEPD_BLACK);
+    uint8_t attention, processing;
+    epd47Counts(s, attention, processing);
+    char n[12];
+    snprintf(n, sizeof(n), "%u", attention);
+    textAt(752, 154, n, &FreeSansBold18pt7b);
+    textAt(752, 178, "NEEDS YOU", CLASSIC_FONT);
+    snprintf(n, sizeof(n), "%u", processing);
+    textAt(752, 244, n, &FreeSansBold18pt7b);
+    textAt(752, 268, "WORKING", CLASSIC_FONT);
+    drawMiniUsage(752, 328, 174, "CLA", s.fiveH);
+    drawMiniUsage(752, 376, 174, "CDX", s.codexP);
+    if (awaiting) {
+        textAt(752, 430,
+               epd47TouchAvailable() ? "TAP CARD · DECIDE" : "GPIO21 · DECIDE",
+               &FreeSansBold9pt7b);
+    }
+    drawEp47Footer(s, awaiting ? "ATTENTION IN FOCUS" : "ONE ACTIVE SESSION");
+}
+
+uint8_t epd47ActiveOrder(const Snap& s, uint8_t out[MAX_ROWS]) {
+    uint8_t n = 0;
+    constexpr AgentDeckEink::StatusKind kinds[2] = {
+        AgentDeckEink::StatusKind::Attention,
+        AgentDeckEink::StatusKind::Processing,
+    };
+    for (uint8_t k = 0; k < 2; k++) {
+        for (uint8_t i = 0; i < s.rowCount; i++)
+            if (AgentDeckEink::classifyStatus(s.rows[i].state) == kinds[k]) out[n++] = i;
+    }
+    return n;
+}
+
+void drawEp47Queue(const Snap& s) {
+    drawEp47Chrome(s, AgentDeckEpd47::Page::Queue);
+    uint8_t order[MAX_ROWS];
+    const uint8_t count = epd47ActiveOrder(s, order);
+    const uint8_t shown = count < 3 ? count : 3;
+    for (uint8_t row = 0; row < shown; row++) {
+        const RowSnap& r = s.rows[order[row]];
+        const int16_t y = 96 + row * 124;
+        display.drawRoundRect(24, y, 912, 108, 7, GxEPD_BLACK);
+        drawAgentGlyph(r.agentType, 42, y + 22, 58);
+        char index[8]; snprintf(index, sizeof(index), "%02u", (unsigned)(row + 1));
+        textAt(122, y + 34, index, &FreeSansBold12pt7b);
+        char name[64]; smartFitText(name, sizeof(name), r.name, 330, &FreeSansBold12pt7b);
+        smartTextAt(178, y + 34, name, &FreeSansBold12pt7b);
+        char state[20]; stateLabel(r.state, state, sizeof(state));
+        textRight(914, y + 32, state, &FreeSansBold9pt7b);
+        const char* detail = r.question[0] && isAwaiting(r.state)
+            ? r.question : (r.work[0] ? r.work : (r.activity[0] ? r.activity : r.tool));
+        char fitted[116]; smartFitText(fitted, sizeof(fitted), detail, 714, &FreeSans9pt7b);
+        smartTextAt(178, y + 76, fitted, &FreeSans9pt7b);
+    }
+    if (shown == 0) {
+        textAt(36, 168, "No active queue.", &FreeSansBold18pt7b);
+        textAt(36, 204, "LIMITS is the automatic resting page.", &FreeSans9pt7b);
+    } else if (count > shown) {
+        char more[32]; snprintf(more, sizeof(more), "+%u MORE ACTIVE", (unsigned)(count - shown));
+        textRight(936, 474, more, &FreeSansBold9pt7b);
+    }
+    drawEp47Footer(s, "MULTIPLE ACTIVE SESSIONS");
+}
+
+void drawEp47Glance(const Snap& s) {
+    switch (epd47Page) {
+        case AgentDeckEpd47::Page::Focus: drawEp47Focus(s); break;
+        case AgentDeckEpd47::Page::Queue: drawEp47Queue(s); break;
+        default:                          drawEp47Limits(s); break;
+    }
+}
+#endif
 
 void drawGlanceFace(const Snap& s) {
     drawPaperHeader(s, PaperFace::Glance);
@@ -1341,7 +1638,11 @@ void drawGlanceFace(const Snap& s) {
             AgentDeckEink::classifyStatus(r.state) == AgentDeckEink::StatusKind::Processing;
         const char* body = awaitingRow
             ? (r.question[0] ? r.question
+#if defined(AGENTDECK_NM_UI)
+                             : "Decision waiting. Press BOOT to open it.")
+#else
                              : "Decision waiting. Use the primary control to open it.")
+#endif
             : (r.work[0] ? r.work
                          : (r.activity[0] ? r.activity
                                           : (r.tool[0] ? r.tool
@@ -1366,13 +1667,65 @@ void drawGlanceFace(const Snap& s) {
             textRight(W - pad, ry, state, CLASSIC_FONT);
         }
     }
-    const int16_t usageY = H - (W <= 420 ? 27 : 38);
+    const int16_t usageY = H - (W <= 420 ? 52 : 38);
     const int16_t uw = (W - x - pad - 12) / 2;
     drawMiniUsage(x, usageY, uw, "CLA", s.fiveH);
     drawMiniUsage(x + uw + 12, usageY, uw, "CDX", s.codexP);
+#if defined(AGENTDECK_NM_UI)
+    display.drawFastHLine(pad, H - 29, W - pad * 2, GxEPD_BLACK);
+    textAt(pad, H - 10, attention > 0 ? "BOOT  DECIDE" : "BOOT  HISTORY", CLASSIC_FONT);
+    textRight(W - pad, H - 10, "USER  HOME", CLASSIC_FONT);
+#endif
 }
 
 void drawDecisionFace(const Snap& s) {
+#if defined(AGENTDECK_EPD47_UI)
+    {
+    drawEp47Chrome(s, epd47Page);
+    const int i = primarySession(s, AgentDeckEink::StatusKind::Attention);
+    constexpr int16_t pad = 28;
+    display.fillRect(0, 86, 10, H - 86, GxEPD_BLACK);
+    textAt(pad, 116, "DECISION", &FreeSansBold9pt7b);
+    if (i < 0) {
+        textAt(pad, 184, "Decision cleared.", &FreeSansBold18pt7b);
+        return;
+    }
+    const RowSnap& r = s.rows[i];
+    drawAgentGlyph(r.agentType, pad, 138, 56);
+    smartTextAt(102, 170, r.name, &FreeSansBold12pt7b);
+    drawParagraph(102, 208, W - 130, 30, 3,
+                  r.question[0] ? r.question : "Agent is waiting for your decision.",
+                  &FreeSansBold18pt7b);
+    constexpr int16_t optionY = 298;
+    constexpr int16_t optionH = 46;
+    constexpr int16_t optionGap = 10;
+    for (uint8_t o = 0; o < s.optionCount && o < 3; o++) {
+        const int16_t y = optionY + o * (optionH + optionGap);
+        const bool selected = !epd47TouchAvailable() && o == epd47DecisionSelection;
+        if (selected) {
+            display.fillRoundRect(pad, y, W - pad * 2, optionH, 6, GxEPD_BLACK);
+            setInk(true);
+        } else {
+            display.drawRoundRect(pad, y, W - pad * 2, optionH, 6, GxEPD_BLACK);
+        }
+        char option[64]; snprintf(option, sizeof(option), "%u  %s", (unsigned)(o + 1), s.options[o]);
+        char fitted[72]; smartFitText(fitted, sizeof(fitted), option, W - pad * 2 - 24,
+                                      &FreeSansBold9pt7b);
+        smartTextAt(pad + 12, y + 30, fitted, &FreeSansBold9pt7b);
+        if (selected) setInk(false);
+    }
+    if (s.optionCount == 0) {
+        textAt(pad, 326, "No device options. Respond on your computer.",
+               &FreeSansBold12pt7b);
+        textRight(W - pad, 472, "GPIO21 BACK", CLASSIC_FONT);
+    } else if (epd47TouchAvailable()) {
+        textRight(W - pad, 472, "TAP AN OPTION  ·  GPIO21 BACK", CLASSIC_FONT);
+    } else {
+        textRight(W - pad, 472, "GPIO21 TAP NEXT  ·  HOLD CONFIRM", CLASSIC_FONT);
+    }
+    return;
+    }
+#endif
     drawPaperHeader(s, PaperFace::Decision);
     const int i = primarySession(s, AgentDeckEink::StatusKind::Attention);
     const int16_t pad = W <= 420 ? 16 : 28;
@@ -1390,16 +1743,52 @@ void drawDecisionFace(const Snap& s) {
                              r.question[0] ? r.question : "Agent is waiting for your decision.",
                              W <= 420 ? &FreeSansBold12pt7b : &FreeSansBold18pt7b);
     int16_t oy = top + (W <= 420 ? 62 : 78) + used * (W <= 420 ? 24 : 30);
-    for (uint8_t o = 0; o < s.optionCount && o < 3 && oy < H - 24; o++) {
+    for (uint8_t o = 0; o < s.optionCount && o < 3 && oy < H - 48; o++) {
         const int16_t oh = W <= 420 ? 31 : 42;
         // Keep red geometry fixed across DECISION content so option text can
         // update through the panel's B/W differential waveform.
+#if defined(AGENTDECK_NM_UI) || defined(AGENTDECK_INKDECK_UI)
+#if defined(AGENTDECK_NM_UI)
+        const bool selected = o == nmDecisionSelection;
+#else
+        const bool selected = o == inkDecisionSelection;
+#endif
+        if (selected) {
+            display.fillRoundRect(pad, oy, W - pad * 2, oh, 5, GxEPD_BLACK);
+            setInk(true);
+        } else {
+            display.drawRoundRect(pad, oy, W - pad * 2, oh, 5, GxEPD_BLACK);
+        }
+#else
         display.drawRoundRect(pad, oy, W - pad * 2, oh, 5, GxEPD_BLACK);
+#endif
         char option[56]; snprintf(option, sizeof(option), "%u  %s", (unsigned)(o + 1), s.options[o]);
         char fitted[64]; smartFitText(fitted, sizeof(fitted), option, W - pad * 2 - 20, &FreeSans9pt7b);
         smartTextAt(pad + 10, oy + (W <= 420 ? 21 : 28), fitted, &FreeSans9pt7b);
+#if defined(AGENTDECK_NM_UI) || defined(AGENTDECK_INKDECK_UI)
+        if (selected) setInk(false);
+#endif
         oy += oh + 7;
     }
+#if defined(AGENTDECK_NM_UI)
+    display.drawFastHLine(pad, H - 29, W - pad * 2, GxEPD_BLACK);
+    if (s.optionCount > 0) {
+        textAt(pad, H - 10, "BOOT  NEXT", CLASSIC_FONT);
+        textRight(W - pad, H - 10, "USER  CONFIRM", CLASSIC_FONT);
+    } else {
+        textAt(pad, H - 10, "RESPOND ON COMPUTER", CLASSIC_FONT);
+        textRight(W - pad, H - 10, "USER  HOME", CLASSIC_FONT);
+    }
+#elif defined(AGENTDECK_INKDECK_UI)
+    display.drawFastHLine(pad, H - 34, W - pad * 2, GxEPD_BLACK);
+    if (s.optionCount > 0) {
+        textAt(pad, H - 12, "KEY1  NEXT", &FreeSansBold9pt7b);
+        textRight(W - pad, H - 12, "KEY2  CONFIRM", &FreeSansBold9pt7b);
+    } else {
+        textAt(pad, H - 12, "RESPOND ON YOUR COMPUTER", &FreeSansBold9pt7b);
+        textRight(W - pad, H - 12, "KEY2  HOME", &FreeSansBold9pt7b);
+    }
+#endif
 }
 
 void drawAnswerFace(const Snap& s) {
@@ -1450,6 +1839,54 @@ void drawSearching(const Snap& s) {
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
     setInk(false);
+#if defined(AGENTDECK_EPD47_UI)
+    {
+    drawEp47Chrome(s, AgentDeckEpd47::Page::Limits);
+    drawAgentDeckMark(W / 2 - 48, 142, 96);
+    const char* title = "OFFLINE";
+    textAt(W / 2 - textWidth(title, &FreeSansBold18pt7b) / 2,
+           302, title, &FreeSansBold18pt7b);
+    const char* msg = s.wifiUp || s.serialUp ? "SEARCHING FOR AGENTDECK"
+                                             : "CONNECT USB OR PROVISION WIFI";
+    textAt(W / 2 - textWidth(msg, &FreeSans9pt7b) / 2, 342, msg, &FreeSans9pt7b);
+    if (s.wifiUp && s.ip[0]) {
+        char line[64]; snprintf(line, sizeof(line), "PANEL %s  ·  mDNS _agentdeck._tcp", s.ip);
+        textAt(W / 2 - textWidth(line, CLASSIC_FONT) / 2, 372, line, CLASSIC_FONT);
+    }
+    display.drawFastHLine(20, 478, W - 40, GxEPD_BLACK);
+    textAt(20, 512, "PAPER HOLDS THIS STATE WITHOUT DISPLAY POWER", &FreeSansBold9pt7b);
+    char tag[64]; snprintf(tag, sizeof(tag), "v%s %.7s", FIRMWARE_VERSION, GIT_SHA);
+    textRight(W - 20, 512, tag, &FreeSans9pt7b);
+    return;
+    }
+#endif
+#if defined(AGENTDECK_NM_UI)
+    {
+    constexpr int16_t pad = 14;
+    display.fillRect(0, 0, W, 7, accentColor());
+    drawAgentDeckMark(pad, 13, 30);
+    textAt(54, 38, "AGENTDECK", &FreeSansBold12pt7b);
+    textRight(W - pad, 35, "OFFLINE", CLASSIC_FONT);
+    display.drawFastHLine(pad, 49, W - pad * 2, GxEPD_BLACK);
+
+    drawAgentDeckMark(W / 2 - 31, 82, 62);
+    const char* title = "OFFLINE";
+    textAt(W / 2 - textWidth(title, &FreeSansBold18pt7b) / 2,
+           181, title, &FreeSansBold18pt7b);
+    const char* msg = s.wifiUp || s.serialUp ? "AGENTDECK NOT FOUND"
+                                             : "CONNECT USB OR WIFI";
+    textAt(W / 2 - textWidth(msg, &FreeSans9pt7b) / 2, 210, msg, &FreeSans9pt7b);
+    if (s.wifiUp && s.ip[0]) {
+        char line[48]; snprintf(line, sizeof(line), "PANEL %s", s.ip);
+        textAt(W / 2 - textWidth(line, CLASSIC_FONT) / 2, 230, line, CLASSIC_FONT);
+    }
+    display.drawFastHLine(pad, H - 39, W - pad * 2, GxEPD_BLACK);
+    const char* reconnect = "AUTO RECONNECTING";
+    textAt(W / 2 - textWidth(reconnect, CLASSIC_FONT) / 2,
+           H - 18, reconnect, CLASSIC_FONT);
+    return;
+    }
+#endif
     const AgentDeckEink::Layout layout = dashboardLayout(s);
     drawBrandHeader(s, layout);
     const int16_t centerY = layout.cards.y + layout.cards.h / 2;
@@ -1464,10 +1901,15 @@ void drawSearching(const Snap& s) {
                                              : "No WiFi · connect USB or provision WiFi";
     textAt(W / 2 - textWidth(msg, &FreeSans9pt7b) / 2, centerY + 70, msg, &FreeSans9pt7b);
     if (s.wifiUp && s.ip[0]) {
-        char line[64]; snprintf(line, sizeof(line), "panel %s · mDNS _agentdeck._tcp", s.ip);
+        char line[64]; snprintf(line, sizeof(line), "panel %s · auto reconnecting", s.ip);
         textAt(W / 2 - textWidth(line, CLASSIC_FONT) / 2, centerY + 94, line, CLASSIC_FONT);
     }
-    drawUsageFooter(s, true, layout);
+    // Usage is cached data at this point. Hiding it is safer than presenting
+    // stale subscription limits as if they were still live.
+    display.drawFastHLine(layout.pad, H - 42, W - layout.pad * 2, GxEPD_BLACK);
+    textAt(layout.pad, H - 16, "AUTO RECONNECT", &FreeSansBold9pt7b);
+    char tag[64]; snprintf(tag, sizeof(tag), "v%s %.7s", FIRMWARE_VERSION, GIT_SHA);
+    textRight(W - layout.pad, H - 16, tag, &FreeSans9pt7b);
 }
 
 void drawDashboard(const Snap& s) {
@@ -1485,7 +1927,23 @@ void drawDashboard(const Snap& s) {
             drawUsageFooter(s, false, layout);
             break;
         }
-        default: drawGlanceFace(s); break;
+        default:
+#if defined(AGENTDECK_EPD47_UI)
+            drawEp47Glance(s);
+#elif defined(BOARD_INKDECK) && !defined(BOARD_SIM_PULL)
+            // InkDeck's home is the live board itself. GLANCE is only the
+            // arbitration name; restoring the proven session-grid hierarchy
+            // keeps active work and provider limits visible together.
+            {
+            const AgentDeckEink::Layout layout = dashboardLayout(s);
+            drawBrandHeader(s, layout);
+            drawSessionGrid(s, layout);
+            drawUsageFooter(s, false, layout);
+            }
+#else
+            drawGlanceFace(s);
+#endif
+            break;
     }
     // NOTE: no Serial logging here — this runs on Core 1 while Core 0 emits
     // protocol JSON lines (device_info replies, acks). Cross-core prints
@@ -1502,6 +1960,7 @@ uint32_t lastFullMs = 0;
 uint8_t partialCount = 0;
 bool firstDraw = true;
 bool forceFull = false;
+bool forceRefresh = false;  // immediate image write without an extra white clear
 bool wasSearching = true;
 char lastTickerShown[104] = "";
 uint32_t repaintCountValue = 0;
@@ -1606,6 +2065,9 @@ void init() {
     // init() and render() run on the same Core 1 loop task, so one static
     // scratch Snap is race-free.
     static Snap s; snapshot(s);
+#if defined(AGENTDECK_EPD47_UI)
+    epd47Page = epd47AutomaticPage(s);
+#endif
     const bool initialSearching = !s.bridgeConnected;
     renderFace = initialSearching ? PaperFace::Roster : PaperFace::Glance;
 #if defined(BOARD_NM_EPD_420)
@@ -1615,6 +2077,19 @@ void init() {
     display.epd2.selectFastFullUpdate(false);
 #endif
     refresh(initialSearching ? drawSearching : drawDashboard, s, true);
+#if defined(AGENTDECK_EPD47_UI)
+    lastPhysicalEpd47Page = epd47Page;
+    physicalEpd47PageReady = true;
+#endif
+#if defined(BOARD_LILYGO_EPD47)
+    // Keep the shipped demo's conservative cold-start order: the first
+    // epd_poweron -> clear/draw -> epd_poweroff cycle finishes before the
+    // external touch header is probed. LilyGo's standalone touch example can
+    // also probe earlier, but the complete demo gives attached controllers
+    // the longest settle window without keeping panel high voltage enabled.
+    Input::touchInit();
+    logHeap("lily-epd-touch");
+#endif
 #if defined(BOARD_NM_EPD_420)
     display.epd2.selectFastFullUpdate(true);
     lastPhysicalFace = renderFace;
@@ -1637,8 +2112,97 @@ void update(float /*dt*/) {
     bool k2 = PIN_KEY2 == PIN_KEY1 ? k1 : digitalRead(PIN_KEY2);
     const bool key1Pressed = key1Prev && !k1;
     const bool key2Pressed = key2Prev && !k2;
+    const bool key1Released = !key1Prev && k1;
+#if defined(BOARD_LILYGO_EPD47)
+    if (key1Released && epd47DecisionButtonTracking) {
+        const uint32_t heldMs = now - epd47DecisionButtonDownMs;
+        epd47DecisionButtonTracking = false;
+        static Snap decisionSnap;
+        snapshot(decisionSnap);
+        if (renderFace == PaperFace::Decision && !Input::touchReady()) {
+            if (decisionSnap.optionCount == 0) {
+                suppressedDecisionHash = lastDecisionHash;
+                manualFace = PaperFace::Glance;
+                interactiveLeaseUntilMs = 0;
+                forceFull = true;
+            } else if (heldMs >= 850) {
+                if (sendDecisionSelection(decisionSnap, epd47DecisionSelection)) {
+                    suppressedDecisionHash = lastDecisionHash;
+                    manualFace = PaperFace::Glance;
+                    faceHoldUntilMs = 0;
+                    interactiveLeaseUntilMs = 0;
+                    epd47Page = epd47AutomaticPage(decisionSnap);
+                    epd47PageHoldUntilMs = now + FACE_HOLD_MS;
+                    forceFull = true;
+                }
+            } else {
+                epd47DecisionSelection =
+                    (uint8_t)((epd47DecisionSelection + 1) % decisionSnap.optionCount);
+                faceHoldUntilMs = now + FACE_HOLD_MS;
+                interactiveLeaseUntilMs = now + FACE_HOLD_MS;
+                forceRefresh = true;
+            }
+            lastHash = 0;
+        }
+    }
+#endif
     if ((key1Pressed || key2Pressed) && now - keyLastMs > 300) {
         keyLastMs = now;
+        bool keyHandled = false;
+        bool keepEpd47PageHold = false;
+        bool refreshAfterPress = true;
+#if defined(BOARD_LILYGO_EPD47)
+        if (key1Pressed && renderFace == PaperFace::Decision && !Input::touchReady()) {
+            // In button-only mode selection happens on release so a long hold
+            // can confirm without also advancing the highlighted option.
+            epd47DecisionButtonDownMs = now;
+            epd47DecisionButtonTracking = true;
+            keyHandled = true;
+            refreshAfterPress = false;
+        }
+#endif
+#if defined(BOARD_NM_EPD_420)
+        if (!keyHandled && renderFace == PaperFace::Decision && lastDecisionHash != 0) {
+            static Snap decisionSnap;
+            snapshot(decisionSnap);
+            if (key1Pressed && decisionSnap.optionCount > 0) {
+                nmDecisionSelection = (uint8_t)((nmDecisionSelection + 1) % decisionSnap.optionCount);
+                faceHoldUntilMs = now + FACE_HOLD_MS;
+                interactiveLeaseUntilMs = now + FACE_HOLD_MS;
+                keyHandled = true;
+            } else if (key2Pressed) {
+                if (decisionSnap.optionCount > 0) {
+                    sendDecisionSelection(decisionSnap, nmDecisionSelection);
+                }
+                suppressedDecisionHash = lastDecisionHash;
+                manualFace = PaperFace::Glance;
+                faceHoldUntilMs = 0;
+                interactiveLeaseUntilMs = 0;
+                keyHandled = true;
+            }
+        }
+#endif
+#if defined(AGENTDECK_INKDECK_UI)
+        if (!keyHandled && renderFace == PaperFace::Decision && lastDecisionHash != 0) {
+            static Snap decisionSnap;
+            snapshot(decisionSnap);
+            if (key1Pressed && decisionSnap.optionCount > 0) {
+                inkDecisionSelection =
+                    (uint8_t)((inkDecisionSelection + 1) % decisionSnap.optionCount);
+                faceHoldUntilMs = now + FACE_HOLD_MS;
+                keyHandled = true;
+            } else if (key2Pressed) {
+                if (decisionSnap.optionCount > 0) {
+                    sendDecisionSelection(decisionSnap, inkDecisionSelection);
+                }
+                suppressedDecisionHash = lastDecisionHash;
+                manualFace = PaperFace::Glance;
+                faceHoldUntilMs = 0;
+                keyHandled = true;
+            }
+        }
+#endif
+        if (!keyHandled) {
         if (PIN_KEY2 != PIN_KEY1 && key2Pressed) {
             // The same physical escape action from every face. A still-open
             // decision stays suppressed only for this exact question hash; a
@@ -1656,10 +2220,23 @@ void update(float /*dt*/) {
                 default: manualFace = PaperFace::Glance; break;
             }
 #else
-            // A physical action opens the bounded pull-device lease. On LilyGo
-            // this is also the invariant escape key: one press opens DIGEST
-            // from GLANCE; the same press returns to GLANCE from every other
-            // face and cancels the lease.
+            // A physical action opens the bounded pull-device lease. On an
+            // EPD47 whose touch controller is unavailable, the user key also
+            // becomes a deterministic tab-cycle fallback.
+#if defined(BOARD_LILYGO_EPD47)
+            if (!Input::touchReady() && renderFace == PaperFace::Glance) {
+                const uint8_t next = ((uint8_t)epd47Page + 1u) % 3u;
+                epd47Page = static_cast<AgentDeckEpd47::Page>(next);
+                epd47PageHoldUntilMs = now + FACE_HOLD_MS;
+                manualFace = PaperFace::Glance;
+                interactiveLeaseUntilMs = now + FACE_HOLD_MS;
+                keepEpd47PageHold = true;
+            } else {
+                if (renderFace == PaperFace::Decision) suppressedDecisionHash = lastDecisionHash;
+                manualFace = PaperFace::Glance;
+                interactiveLeaseUntilMs = 0;
+            }
+#else
             if (PIN_KEY1 == PIN_KEY2) {
                 if (renderFace == PaperFace::Decision) suppressedDecisionHash = lastDecisionHash;
                 if (renderFace == PaperFace::Glance) {
@@ -1675,12 +2252,81 @@ void update(float /*dt*/) {
                 interactiveLeaseUntilMs = now + FACE_HOLD_MS;
             }
 #endif
+#endif
             faceHoldUntilMs = manualFace == PaperFace::Glance ? 0 : now + FACE_HOLD_MS;
         }
-        forceFull = true;
-        lastHash = 0;  // force redraw even if content unchanged
+        }
+        if (refreshAfterPress) {
+            forceFull = true;
+            lastHash = 0;  // force redraw even if content unchanged
+        }
+#if defined(AGENTDECK_EPD47_UI)
+        if (refreshAfterPress && !keepEpd47PageHold) epd47PageHoldUntilMs = 0;
+#endif
     }
     key1Prev = k1; key2Prev = k2;
+
+#if defined(BOARD_LILYGO_EPD47)
+    const Input::TouchEvent touch = Input::touchPoll(now);
+    if (touch.gesture == Input::TouchGesture::TAP) {
+        static Snap touchSnap;
+        snapshot(touchSnap);
+        bool handled = false;
+
+        if (renderFace == PaperFace::Decision &&
+            touch.x >= 28 && touch.x < W - 28 && touch.y >= 298) {
+            constexpr int16_t optionH = 46;
+            constexpr int16_t stride = 56;
+            const int index = (touch.y - 298) / stride;
+            const int offset = (touch.y - 298) % stride;
+            const int awaiting = primarySession(touchSnap, AgentDeckEink::StatusKind::Attention);
+            if (index >= 0 && index < touchSnap.optionCount && offset < optionH && awaiting >= 0) {
+                char command[112];
+                snprintf(command, sizeof(command),
+                         "{\"type\":\"select_option\",\"index\":%d,\"sessionId\":\"%s\"}",
+                         index, touchSnap.rows[awaiting].id);
+                Net::queueOutbound(command);
+                suppressedDecisionHash = decisionHash(touchSnap);
+                epd47Page = epd47AutomaticPage(touchSnap);
+                epd47PageHoldUntilMs = now + FACE_HOLD_MS;
+                manualFace = PaperFace::Glance;
+                faceHoldUntilMs = now + FACE_HOLD_MS;
+                interactiveLeaseUntilMs = now + FACE_HOLD_MS;
+                handled = true;
+            }
+        }
+
+        if (!handled && touch.y >= 8 && touch.y <= 76 &&
+            touch.x >= 278 && touch.x < 704) {
+            const uint8_t tab = (uint8_t)((touch.x - 278) / 142);
+            epd47Page = static_cast<AgentDeckEpd47::Page>(tab < 3 ? tab : 2);
+            epd47PageHoldUntilMs = now + FACE_HOLD_MS;
+            manualFace = PaperFace::Glance;
+            faceHoldUntilMs = now + FACE_HOLD_MS;
+            interactiveLeaseUntilMs = now + FACE_HOLD_MS;
+            handled = true;
+        }
+
+        if (!handled && renderFace == PaperFace::Glance &&
+            epd47Page != AgentDeckEpd47::Page::Limits &&
+            touch.y > 86 && touch.y < 470 &&
+            primarySession(touchSnap, AgentDeckEink::StatusKind::Attention) >= 0) {
+            manualFace = PaperFace::Decision;
+            faceHoldUntilMs = now + FACE_HOLD_MS;
+            interactiveLeaseUntilMs = now + FACE_HOLD_MS;
+            epd47PageHoldUntilMs = 0;
+            handled = true;
+        }
+
+        if (handled) {
+            // EPD47's direct image write does not erase the previous physical
+            // page. Every tab/decision transition must clear once or old tab
+            // underlines and text remain visibly selected underneath it.
+            forceFull = true;
+            lastHash = 0;
+        }
+    }
+#endif
 }
 
 void render() {
@@ -1695,11 +2341,24 @@ void render() {
 
     bool searching = !s.bridgeConnected;
     const bool leaseActive = interactiveLeaseActive(now);
+    const bool faceHeld = faceHoldUntilMs != 0 && (int32_t)(faceHoldUntilMs - now) > 0;
+#if defined(AGENTDECK_EPD47_UI)
+    const bool pageHeld = epd47PageHoldUntilMs != 0 &&
+                          (int32_t)(epd47PageHoldUntilMs - now) > 0;
+    if (!pageHeld) {
+        epd47PageHoldUntilMs = 0;
+        const auto automatic = epd47AutomaticPage(s);
+        if (automatic != epd47Page) {
+            epd47Page = automatic;
+            forceFull = true;
+        }
+    }
+#endif
     const int awaiting = primarySession(s, AgentDeckEink::StatusKind::Attention);
     const int processing = primarySession(s, AgentDeckEink::StatusKind::Processing);
     if (processing >= 0) sawProcessing = true;
     const uint32_t currentAnswer = answerHash(s);
-    if (sawProcessing && processing < 0 && currentAnswer != 0 &&
+    if (sawProcessing && processing < 0 && currentAnswer != 0 && !faceHeld &&
         currentAnswer != lastAnswerHash && leaseActive) {
         lastAnswerHash = currentAnswer;
         manualFace = PaperFace::Answer;
@@ -1707,8 +2366,32 @@ void render() {
         sawProcessing = false;
     }
     lastDecisionHash = decisionHash(s);
+#if defined(AGENTDECK_EPD47_UI)
+    if (lastDecisionHash != epd47SelectionDecisionHash) {
+        epd47SelectionDecisionHash = lastDecisionHash;
+        epd47DecisionSelection = 0;
+    }
+#endif
+#if defined(AGENTDECK_NM_UI)
+    if (lastDecisionHash != nmSelectionDecisionHash) {
+        nmSelectionDecisionHash = lastDecisionHash;
+        nmDecisionSelection = 0;
+    }
+#endif
+#if defined(AGENTDECK_INKDECK_UI)
+    if (lastDecisionHash != inkSelectionDecisionHash) {
+        inkSelectionDecisionHash = lastDecisionHash;
+        inkDecisionSelection = 0;
+    }
+#endif
     if (searching) {
         renderFace = PaperFace::Roster;
+#if defined(AGENTDECK_EPD47_UI)
+    } else if (faceHeld) {
+        // A touch-selected tab/face owns the body for eight minutes. New work
+        // is announced in the footer but does not steal the user's page.
+        renderFace = manualFace;
+#endif
     } else if (awaiting >= 0 && lastDecisionHash != suppressedDecisionHash && leaseActive) {
         renderFace = PaperFace::Decision;
     } else if (!searching && faceHoldUntilMs != 0 && (int32_t)(faceHoldUntilMs - now) > 0) {
@@ -1719,18 +2402,21 @@ void render() {
         renderFace = PaperFace::Glance;
     }
     uint32_t h = paperHash(s, renderFace);
-    if (h == lastHash && !forceFull) return;
+    if (h == lastHash && !forceFull && !forceRefresh) return;
     bool urgentTransition = searching != wasSearching;
 #if defined(BOARD_NM_EPD_420)
     urgentTransition = urgentTransition || !physicalFaceReady || renderFace != lastPhysicalFace;
 #endif
-    if (!forceFull && !urgentTransition &&
+    if (!forceFull && !forceRefresh && !urgentTransition &&
         (now - lastDrawMs) < MIN_REFRESH_INTERVAL_MS) return;  // coalesce bursts
 
     bool full = forceFull || firstDraw ||
                 partialCount >= FULL_EVERY_N_PARTIALS ||
                 (now - lastFullMs) > FULL_MAX_AGE_MS ||
                 (searching != wasSearching);
+#if defined(AGENTDECK_EPD47_UI)
+    full = full || !physicalEpd47PageReady || epd47Page != lastPhysicalEpd47Page;
+#endif
 #if defined(BOARD_NM_EPD_420)
     // The installed tri-color glass darkens under refresh_bw(), even when the
     // RAM window excludes every red pixel. Stock full-color waveform only.
@@ -1741,6 +2427,11 @@ void render() {
     // the first timed repaint replaces OFFLINE with "no active sessions".
     refresh(searching ? drawSearching : drawDashboard, s, full);
 
+#if defined(AGENTDECK_EPD47_UI)
+    lastPhysicalEpd47Page = epd47Page;
+    physicalEpd47PageReady = true;
+#endif
+
 #if defined(BOARD_NM_EPD_420)
     lastPhysicalFace = renderFace;
     physicalFaceReady = true;
@@ -1750,6 +2441,7 @@ void render() {
     lastDrawMs = now;
     firstDraw = false;
     forceFull = false;
+    forceRefresh = false;
     wasSearching = searching;
     strncpy(lastTickerShown, s.tickerCount > 0 ? s.tickerText[0] : "", sizeof(lastTickerShown) - 1);
     lastTickerShown[sizeof(lastTickerShown) - 1] = '\0';

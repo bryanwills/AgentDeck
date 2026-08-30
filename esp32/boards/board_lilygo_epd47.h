@@ -14,3 +14,11 @@
 #define BOARD_PIN_KEY2      21
 #define BOARD_PIN_WAKE      21
 #define BOARD_PIN_BATT_ADC  14
+
+// Capacitive touch bus. Current boards use GT911; firmware also probes the
+// older controller carried by the pinned vendor library. IRQ is not RTC-
+// capable on the S3, so GPIO21 remains the deep-sleep wake/escape input.
+#define BOARD_PIN_I2C_SDA    18
+#define BOARD_PIN_I2C_SCL    17
+#define BOARD_PIN_TOUCH_INT  47
+#define BOARD_PIN_TOUCH_RST  -1

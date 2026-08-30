@@ -136,6 +136,9 @@ enum PixooPreview {
         // state (bubbles, particles, creature positions) across frames, so
         // sharing one would leak non-determinism into previews.
         let renderer = PixooRenderer()
+        if config.state == .disconnected && config.liveState == nil {
+            return renderer.renderDisconnectedFrame()
+        }
         return renderer.render(dashboardState: state)
         #else
         return Self.iOSStubRGB()

@@ -23,6 +23,8 @@ export type MicroAggregate = 'idle' | 'processing' | 'awaiting' | 'error';
 export const MICRO_SIZE = 11;
 
 const BACKGROUND: RGB = [2, 6, 10];
+const OFFLINE_ACCENT: RGB = [0, 48, 56];
+const OFFLINE_GLYPH: RGB = [68, 88, 92];
 const IDLE_RAIL: RGB = [38, 170, 116];
 const PROCESSING_RAIL: RGB = [82, 220, 255];
 const AWAITING_RAIL: RGB = [255, 184, 54];
@@ -160,4 +162,29 @@ export function paintTimeboxBeacon(
   if (creature) paintOfficialMark(buf, creature, aggregate);
   else paintStandby(buf, animFrame);
   paintStatusRail(buf, aggregate, animFrame);
+}
+
+/** Static 11×11 compact equivalent of the passive OFFLINE card. Literal text
+ * cannot fit this panel, so a broken-link ring carries the state while the dim
+ * cyan corner accents preserve the same dark AgentDeck grammar with sparse LEDs. */
+export function paintTimeboxOffline(buf: Uint8Array): void {
+  if (buf.length !== MICRO_SIZE * MICRO_SIZE * 3) return;
+  for (let i = 0; i < MICRO_SIZE * MICRO_SIZE; i++) buf.set(BACKGROUND, i * 3);
+
+  for (const [x, y] of [
+    [0, 0], [1, 0], [0, 1], [9, 0], [10, 0], [10, 1],
+    [0, 9], [0, 10], [1, 10], [10, 9], [9, 10], [10, 10],
+  ] as const) setPixel(buf, x, y, OFFLINE_ACCENT);
+
+  // 7×7 open ring + slash. The gap at the lower-left keeps the slash and ring
+  // from merging into an unreadable filled diamond through the diffuser.
+  for (let x = 2; x <= 8; x++) {
+    setPixel(buf, x, 2, OFFLINE_GLYPH);
+    setPixel(buf, x, 8, OFFLINE_GLYPH);
+  }
+  for (let y = 3; y <= 7; y++) {
+    if (y !== 7) setPixel(buf, 2, y, OFFLINE_GLYPH);
+    setPixel(buf, 8, y, OFFLINE_GLYPH);
+  }
+  for (let i = 0; i < 7; i++) setPixel(buf, 2 + i, 8 - i, OFFLINE_GLYPH);
 }

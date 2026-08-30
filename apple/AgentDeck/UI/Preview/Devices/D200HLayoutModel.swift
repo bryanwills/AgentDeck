@@ -24,7 +24,7 @@
 // against; `scripts/check-preview-mirror-sync.mjs` verifies they match the
 // current `git hash-object` of each file and fails CI when the origin drifts
 // ahead of this mirror. Update them whenever you re-port.
-// SYNC-HASH shared/src/d200h-layout.ts 684d497bd054842d4b4ac5afdd3509a5f95983e9
+// SYNC-HASH shared/src/d200h-layout.ts 0a8da601be0e95e753084a72c0ed788caabcdc59
 // SYNC-HASH shared/src/session-utils.ts 3f6629cd69bd4d77f380cb5e37972f28863058e7
 //
 // INTENTIONALLY OMITTED (not needed by a read-only preview):
@@ -303,8 +303,9 @@ public enum D200HSlotKind: Equatable, Sendable {
     case session(agentType: String, state: String, stateLabel: String)
     /// Quiet/empty tile (renderEmptySlot).
     case empty
-    /// OFFLINE AgentDeck brand-mark hero (renderInfoSlot .. tone "brand").
-    case offlineHero
+    /// One viewport of the deck-spanning OFFLINE card. Coordinates mirror
+    /// `renderOpenAppGrid` in the shared TypeScript renderer.
+    case offlineGrid(col: Int, row: Int, cols: Int, rows: Int)
     /// A status/info card (renderInfoSlot / renderStatusCard).
     case info(icon: String, tone: String)
     /// BACK to session list (renderBackButton).
@@ -394,17 +395,19 @@ public enum D200HLayoutModel {
         // focused session is active — but observed sessions still arrive via
         // sessions_list. So OFFLINE is reserved for a genuinely EMPTY list.
         if isDisconnected(input.state) && input.sessions.isEmpty {
-            let hero = slots.count / 2
-            return slots.enumerated().map { i, pos in
+            let parsed = slots.map { pos -> (String, Int, Int) in
                 let (col, row) = parse(pos)
-                if i == hero {
-                    return D200HKeySlot(
-                        position: pos, col: col, row: row,
-                        kind: .offlineHero, label: offlineLabel, subtitle: openAgentDeckLabel,
-                        action: .launch
-                    )
-                }
-                return D200HKeySlot(position: pos, col: col, row: row, kind: .empty, label: "", subtitle: nil, action: .launch)
+                return (pos, col, row)
+            }
+            let cols = max(1, (parsed.map { $0.1 }.max() ?? 0) + 1)
+            let rows = max(1, (parsed.map { $0.2 }.max() ?? 0) + 1)
+            return parsed.map { pos, col, row in
+                D200HKeySlot(
+                    position: pos, col: col, row: row,
+                    kind: .offlineGrid(col: col, row: row, cols: cols, rows: rows),
+                    label: offlineLabel, subtitle: openAgentDeckLabel,
+                    action: .launch
+                )
             }
         }
 
@@ -452,10 +455,16 @@ public enum D200HLayoutModel {
         }
 
         if sessions.isEmpty {
+            let ready: [(D200HSlotKind, String, String)] = [
+                (.info(icon: "hub", tone: "ready"), "HUB READY", "connected"),
+                (.info(icon: "no-session", tone: "idle"), "NO SESSION", "waiting"),
+                (.info(icon: "agentdeck", tone: "agent"), "AgentDeck", "idle"),
+            ]
             for (i, pos) in freeSlots.enumerated() {
                 let (col, row) = parse(pos)
-                if i == 0 {
-                    out.append(D200HKeySlot(position: pos, col: col, row: row, kind: .info(icon: "activity", tone: "info"), label: "NO SESSION", subtitle: "waiting", action: .none))
+                if i < ready.count {
+                    let card = ready[i]
+                    out.append(D200HKeySlot(position: pos, col: col, row: row, kind: card.0, label: card.1, subtitle: card.2, action: .none))
                 } else {
                     out.append(D200HKeySlot(position: pos, col: col, row: row, kind: .empty, label: "", subtitle: nil, action: .none))
                 }

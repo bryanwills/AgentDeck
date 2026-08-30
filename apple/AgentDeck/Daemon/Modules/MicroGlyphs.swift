@@ -17,6 +17,8 @@ enum MicroGlyphs {
     static let size = 11
 
     private static let background: RGB = (2, 6, 10)
+    private static let offlineAccent: RGB = (0, 48, 56)
+    private static let offlineGlyph: RGB = (68, 88, 92)
     private static let idleRail: RGB = (38, 170, 116)
     private static let processingRail: RGB = (82, 220, 255)
     private static let awaitingRail: RGB = (255, 184, 54)
@@ -165,6 +167,31 @@ enum MicroGlyphs {
         if let creature { paintOfficialMark(&buf, creature: creature, aggregate: aggregate) }
         else { paintStandby(&buf, animFrame: animFrame) }
         paintStatusRail(&buf, aggregate: aggregate, animFrame: animFrame)
+    }
+
+    /// Static 11×11 compact equivalent of the passive OFFLINE card. Text does
+    /// not fit, so a broken-link ring plus dim cyan corners carries the state.
+    static func paintOffline(_ buf: inout [UInt8]) {
+        guard buf.count == size * size * 3 else { return }
+        for i in 0..<(size * size) {
+            buf[i * 3] = background.0
+            buf[i * 3 + 1] = background.1
+            buf[i * 3 + 2] = background.2
+        }
+        let corners = [
+            (0, 0), (1, 0), (0, 1), (9, 0), (10, 0), (10, 1),
+            (0, 9), (0, 10), (1, 10), (10, 9), (9, 10), (10, 10),
+        ]
+        for (x, y) in corners { setPixel(&buf, x: x, y: y, color: offlineAccent) }
+        for x in 2...8 {
+            setPixel(&buf, x: x, y: 2, color: offlineGlyph)
+            setPixel(&buf, x: x, y: 8, color: offlineGlyph)
+        }
+        for y in 3...7 {
+            if y != 7 { setPixel(&buf, x: 2, y: y, color: offlineGlyph) }
+            setPixel(&buf, x: 8, y: y, color: offlineGlyph)
+        }
+        for i in 0..<7 { setPixel(&buf, x: 2 + i, y: 8 - i, color: offlineGlyph) }
     }
 }
 #endif

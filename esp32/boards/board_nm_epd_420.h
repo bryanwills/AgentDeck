@@ -17,8 +17,8 @@
 #define BOARD_PIN_EPD_RST   5
 #define BOARD_PIN_EPD_BUSY  6
 
-// BOOT is an RTC GPIO and is the deep-sleep wake/PTT control. USER is the
-// invariant escape control while awake.
+// BOOT is an RTC GPIO and is the deep-sleep wake / primary-next control.
+// USER is home outside DECISION and select/confirm while DECISION is visible.
 #define BOARD_PIN_KEY1      0
 #define BOARD_PIN_KEY2     45
 #define BOARD_PIN_WAKE      0
