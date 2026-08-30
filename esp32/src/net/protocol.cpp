@@ -52,7 +52,13 @@
 #endif
 #if defined(BOARD_HAS_VOICE_CAPTURE) && !defined(BOARD_T_EMBED)
 #include "../audio/mic_capture.h"
-#include "../ui/widgets/hud_bar.h"
+#endif
+// The HUD calls below sit under the SPEAKER guard, not the capture guard, so
+// this include has to follow the same condition or a playback-only board fails
+// to compile. surface_notify.h resolves to the LVGL HUD or to the paper
+// timeline depending on the surface.
+#if defined(BOARD_HAS_SPEAKER) && !defined(BOARD_T_EMBED)
+#include "../ui/surface_notify.h"
 #endif
 
 // Reusable JSON document — sized for typical bridge messages
@@ -1160,7 +1166,7 @@ static void sendDeviceInfo() {
             // daemon cannot use is worse than an absent one.
             if (Input::nfcReady()) caps.add("nfc");
             if (Audio::micReady()) caps.add("audio");
-            if (Audio::playbackReady()) caps.add("audio_out");
+            if (Audio::speakerAudible()) caps.add("audio_out");
             if (Input::irReady()) caps.add("ir_rx");
         }
         Input::PowerStatus ps = Input::powerStatus();
@@ -1203,6 +1209,23 @@ static void sendDeviceInfo() {
         } else {
             resp["batteryDiag"] = ps.gaugeErr;
         }
+    }
+#endif
+#if defined(BOARD_EINK_SURFACE) && defined(BOARD_HAS_SPEAKER)
+    // The e-ink surface had no capability block at all: it is display-first and
+    // none of these boards had a peripheral to advertise. The RockBase
+    // NM-EPD-420 does — an ES8311 that answers at 0x18 (probed on hardware
+    // 2026-08-30) — so the fleet's spoken-reply routing needs to hear about it.
+    //
+    // Unlike ips10 this is not split per transport: that board's serial link is
+    // a CH340 pinned at 115200 (~11.5 KB/s) against a ~44 KB/s base64 PCM16
+    // reply, which physically cannot carry audio. This board's link is native
+    // USB CDC on the S3, a different order of magnitude. The throughput has NOT
+    // been measured here, so if a serial-attached reply is ever observed to
+    // stutter, the fix is the same per-transport split, not a smaller buffer.
+    if (Audio::speakerAudible()) {
+        JsonArray caps = resp["capabilities"].to<JsonArray>();
+        caps.add("audio_out");
     }
 #endif
 #if defined(BOARD_LILYGO_EPD47)
@@ -1256,7 +1279,7 @@ static void sendDeviceInfo() {
     Net::serialWriteJsonLine(buf);
     if (Net::wsConnected()) {
         JsonArray caps = resp["capabilities"].as<JsonArray>();
-        if (Audio::playbackReady()) caps.add("audio_out");
+        if (Audio::speakerAudible()) caps.add("audio_out");
         serializeJson(resp, buf, sizeof(buf));
         Net::wsSend(buf);
     }

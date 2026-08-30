@@ -51,6 +51,115 @@ retirement 티켓에서 replacement gate와 release checklist를 관리하는 �
 `AGENTDECK_COMMANDER_ARGS`와 agent별 `AGENTDECK_*_ARGS`를 명시적 공개 계약으로
 추가했다.
 
+## 2026-08-31 — E-ink 3종 재설계: 깜빡임의 출처, 놀고 있던 회색조와 빨강, 그리고 표시기술로 잠겨 있던 오디오
+
+세 판을 하드웨어 기준으로 다시 봤다. 불만 세 가지(깜빡임 / 빨강 미활용 / 스피커·마이크 미활용)는
+각각 다른 원인이었고, 넷째 문제는 계측기 자체였다.
+
+**계측기부터.** 호스트 시뮬레이터의 NM 프리뷰는 `-DBOARD_SIM_NM` 으로 빌드되고
+`BOARD_NM_EPD_420` 은 정의하지 않는데, `accentColor()` 와 헤더 accent 가 후자를 보고
+있었다. 즉 **NM의 모든 빨강 배치가 지금까지 검정으로 프리뷰됐다** — 회귀가 나도 sim이
+못 잡고, 목업 리뷰도 패널과 다른 것을 봤다. 두 가드를 `AGENTDECK_NM_UI` 로 옮기고 shim에
+세 번째 잉크와 PNG 매핑을 추가했다. 실측: crowd 프레임 distinct color 2 → 3, 빨강 2.33%.
+
+**깜빡임.** InkDeck 17% / EPD47 88% / NM 100% (fullRefreshCount/repaintCount 실측).
+InkDeck은 정책대로(20%)고 NM의 100%는 유리 손상 실측에 근거한 옳은 결정이니, 문제는
+EPD47 하나였다. 원인은 `full = full || epd47Page != lastPhysicalEpd47Page` 와
+`automaticPage(attention, processing)` 의 조합 — 세션이 6개 도는 기계에서 그 카운트는
+계속 흔들리고, 흔들릴 때마다 960×540 전면 `epd_clear()` 다. 게다가 그 경로가 `forceFull`
+을 세워 60초 coalesce 창까지 우회했다. `AgentDeckEpd47::arbitratePage` 를 SSOT 헤더에
+넣어 새 페이지가 두 repaint 창 동안 유지될 때만 채택하고, settled 전환은 강제 repaint 없이
+다음 주기를 타게 했다. **attention은 면제** — 사용자가 기다리는 유일한 전환이라 즉시 바꾼다.
+호스트 테스트 3케이스(노이즈 왕복 / attention 면제 / millis 랩어라운드)를 추가하고
+뮤테이션 3종으로 게이트가 실제로 무는지 확인했다. `sim/run-tests.sh` 로 실행한다.
+
+**회색조.** EPD47 캔버스는 `shade = color == GxEPD_WHITE ? 0x0F : 0x00` 이었다 — 16단계
+패널의 4비트 프레임버퍼에 2단계만 담고 있었다. 렌더 PNG의 distinct color가 정확히 2였던
+이유다. RGB565 회색을 6비트 green 채널에서 디코드하도록 바꿔 캔버스와 시뮬레이터가 같은
+디코드를 쓴다. **다른 두 판에서는 소스에서 접는다**: GxEPD2는 흰색이 아닌 모든 색을 solid
+ink로 칠하므로 공유 헬퍼(`drawMiniUsage`)에 회색을 넘기면 게이지 트랙이 통째로 검게
+칠해진다 — 우아하게 degrade 하지 않는다. sim shim의 양자화만 믿었으면 프리뷰는 깨끗하고
+패널만 검은 막대가 나왔을 것이다. `static_assert` 두 개로 고정했다.
+
+**밀도.** QUEUE가 960×540에 108px 카드 3장 + `+1 MORE ACTIVE` 였다 — 함대에서 가장 큰
+판이 400×300 NM보다 적게 보여주고 있었다. 44px zebra 행으로 7행이 들어가고, 짧아진 행이
+비운 ~250px에는 InkDeck이 이미 가치를 증명한 provider 사용량 레일을 넣었다. detail 열은
+state 열과 겹치지 않도록 폭이 elision 예산으로 고정돼 있다.
+
+**터치 문법.** 탭이 눌리는 물건으로 보이도록 plate를 깔고, DECISION 옵션의 `1 2 3` 접두어를
+없앴다(그건 GPIO21 순환을 세기 위한 것이었다). 탭 기하는 렌더러의 local constexpr 과 탭
+핸들러의 리터럴 3개로 이중화돼 있어 조용한 오조준 대기 상태였다 — `EPD47_TAB_*` 로 합쳤다.
+`epd47TouchAvailable()` 의 프리뷰 분기는 "설치된 유닛의 컨트롤러가 응답하지 않는다"는
+낡은 주석과 함께 false 였다. 이제 기본 프리뷰는 터치 문법을 그리고,
+`lilygo_epd47_notouch_preview` 가 FPC 미체결 상태의 GPIO21 문법을 별도로 렌더한다.
+
+**빨강.** NM은 `full = true` 강제라 매 갱신마다 tri-color 비용을 100% 지불한다. 빨강은 이미
+값을 치른 채널인데 7px 상단 바와 좌측 레일에만 쓰이고 있었다. 이제 attention 전용이다 —
+`N NEEDS YOU` 카운트, awaiting state 단어, 그리고 무언가 사용자를 기다릴 때만 헤더 레일.
+attention이 없으면 프레임에 빨강이 하나도 없다. 갱신 정책도 시간 기반에서 전이 기반으로
+옮겼다: 경과시간 문자열 하나 바꾸려고 전체 tri-color 사이클을 도는 대신, 루틴 바닥은
+15분이고 face/link/**카운트** 변화가 그것을 우회한다.
+
+**오디오.** 세 e-ink 환경 전부 `build_src_filter` 에 `-<audio/*>` 를 달고 있었다 —
+**표시 기술을 키로 건 배제인데 오디오는 독립 축이다.** NM에는 ES8311 + 외부 PA가 있고
+`src/audio/es8311_codec.*` 는 이미 트리에 있었다. 막고 있던 것은 기능이 아니라 트랜스포트:
+코덱은 `UI::hwI2cReadReg8` 로 버스에 닿는데 그 구현이 `ui/display.cpp`(모든 e-ink env가
+제외하는 LVGL 모듈)에만 있었다. `src/audio/i2c_reg.h` 로 계약만 선언하고
+`src/ui/eink/eink_i2c.cpp` 에 Wire 구현을 넣었다. `HUD::` 도 같은 모양이라
+`src/ui/surface_notify.h` 가 LVGL 보드에서는 진짜 HUD로, 종이에서는 로컬 타임라인 행으로
+해석된다. **실측: `[ES8311] probe at 0x18: codec present`** — 코덱은 실재하고 기본 주소로
+응답한다. 여기서 `playbackReady()` 가 "링 버퍼가 있다"는 뜻이지 "코덱이 답했다"가 아님을
+발견해 `speakerAudible()` 을 분리했다 — `audio_out` 은 이제 chip-ID 응답으로 뒷받침된다.
+NM device_info가 `capabilities: ["audio_out"]` 를 보고한다. **소리가 실제로 나는지는 아직
+확인하지 않았다.** 마이크는 의도적으로 보류했다: 모든 voice-capture 소비자가 LVGL `HUD::`
+로 진행을 알리는데 종이에는 그 자리가 없고, 무음 no-op을 끼우면 BOOT을 눌러도 아무 피드백이
+없다. 종이용 캡처 표시기가 선행 과제다.
+
+검증: 12개 ESP32 env 전부 컴파일, 호스트 테스트 통과, e-ink 4개 프리뷰 env × 10 scene 렌더,
+NM/EPD47 실기 해시 검증 플래시. InkDeck은 런타임 포트로 플래시가 불가(BOOT 버튼 없음)하고
+시리얼 연결 중이라 WiFi 레지스트리에 없어 OTA 대상도 아니다 — 이번 라운드에서 렌더 델타는
+없지만 buildHash는 뒤처져 있다.
+
+남은 것: EPD47 180° 터치 매핑 실기 확인, NM 실제 발성 확인, InkDeck buildHash 정렬,
+EPD47 full-refresh 비율 재측정(정상 부하에서 88% → 20%대인지).
+
+## 2026-08-30 — EPD47 터치는 펌웨어가 아니라 빠져 있던 FPC였고, "버스에 없다"는 소프트웨어로 더 좁혀지지 않는다
+
+EPD47 터치 무동작의 원인은 터치 패널의 8핀 FPC가 헤더 `P6`에서 빠져 있던 것이다.
+재체결 후 같은 `3d975d47-dirty` 이미지에서 즉시 `touchAddress: 0x5D`,
+`touchI2cDeviceCount: 2`, `capabilities`에 `touch`가 올라왔고 탭이 등록됐다.
+그 전 판독은 `touchReady: false` / `touchAddress: 0` / `touchI2cDeviceCount: 1`
+(PCF8563 RTC 0x51 단독)이었다.
+
+판정을 네 겹으로 쌓았지만 넷 다 같은 값으로 수렴했다는 것이 이 항목의 요점이다.
+(1) AgentDeck 펌웨어의 `0x08~0x77` 3패스 + INT low→high 웨이크 후 4번째 패스,
+legacy `0x5A` 드라이버 포함. (2) 벤더 `examples/touch` — 실기에서
+`Failed to find GT911` 반복. (3) 벤더 저장소의 공장 prebuilt
+`firmware/T5-ePaper-S3_demo_250901.bin` — 패널에 직접 `Touch is probe failed! 😂`
+자가 보고. (4) 회로도 `Screen-4.7-S3-V2.4` — `P6` FPC 1번핀은 `VDD3V3`
+상시 전원이라 `epd_poweroff()` 와 무관하고, `T_RST`는 4.7K 풀업 + 1uF RC뿐이라
+GPIO 제어가 없다. I2C에서 **미체결 · 미장착 SKU · 칩 사망은 모두 "ACK 없음"
+하나로 수렴**하므로, 같은 버스 대조군(RTC)이 응답하는 것을 확인한 시점 이후의
+소프트웨어 조사는 해상도를 올리지 못한다. 커넥터 재체결과 3V3 완전 차단이
+먼저다 — `T_RST`에 GPIO가 없어 USB 리셋이나 재플래시로는 GT911의 POR와
+주소 선택이 다시 실행되지 않는다.
+
+부수적으로 확인한 사실. 우리가 핀한 `LilyGo-EPD47` 커밋 `391b0e25`(2026-08-19)는
+그 저장소의 **기본 브랜치 `esp32s3` HEAD 자체**이고 `master`는 2024-04-08에서
+멈춘 ESP32 시절 브랜치다. 벤더의 두 예제는 프로브 순서가 다르다 —
+`examples/demo`는 `epd_poweron()` 활성 상태에서, `examples/touch`와 AgentDeck은
+패널 전원이 꺼진 상태에서 프로브한다. 터치 VDD가 상시 레일이라 결과는 같다.
+
+무빌드 왕복 검증 절차를 기록해둔다. `esptool read-flash 0x0 0x120000`으로 현
+펌웨어를 뜨고, 벤더 bin을 `write-flash --flash-mode/freq/size keep 0x0`으로
+올려 화면을 읽은 뒤, 백업을 되쓰고 다시 읽어 `cmp`로 byte-exact를 확인했다.
+USB-Serial-JTAG 보드에서 `--baud 921600` 재협상은 스트림을 깨뜨린다
+(`Serial data stream stopped`) — 기본 baud로도 1.2 Mbit/s가 나온다.
+
+남은 것: `mapLandscapePoint`의 EPD47 180° 변환은 터치가 한 번도 동작하지 않는
+동안 작성돼 실기 검증 이력이 없다. 탭 스트립에서 누른 탭이 실제로 선택되는지가
+첫 검증 대상이다.
+
 ## 2026-08-30 — Design token self-test가 생성 대시보드의 실제 primitive를 다시 변조한다
 
 `verify-tokens-sync.py --self-test`의 두 CSS-root 케이스가 예전에 제거된

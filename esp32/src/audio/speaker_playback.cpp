@@ -215,10 +215,26 @@ bool playbackInit() {
     Serial.printf("[Speaker] playback ready (%u KB ring, internal heap %u KB)\n",
                   (unsigned)(RING_BYTES / 1024),
                   (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
+#if defined(BOARD_SPK_CODEC_ES8311)
+    // Probe now so `audio_out` is answerable from the first device_info rather
+    // than only after an utterance has already been attempted and lost.
+    Es8311::present();
+#endif
     return true;
 }
 
 bool playbackReady() { return s_ring != nullptr; }
+
+bool speakerAudible() {
+    if (s_ring == nullptr) return false;
+#if defined(BOARD_SPK_CODEC_ES8311)
+    return Es8311::present();
+#else
+    // Boards driving an amplifier directly off I2S have nothing to interrogate;
+    // a ready transport is the whole answer there.
+    return true;
+#endif
+}
 
 void playbackBegin(uint32_t sampleRate) {
     if (!playbackInit()) return;

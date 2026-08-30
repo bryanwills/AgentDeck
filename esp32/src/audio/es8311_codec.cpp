@@ -3,13 +3,28 @@
 #if defined(BOARD_SPK_CODEC_ES8311)
 
 #include "es8311_codec.h"
-#include "../ui/display.h"          // UI::hwI2cReadReg8 / hwI2cWriteReg8
+#include "i2c_reg.h"                 // UI::hwI2cReadReg8 / hwI2cWriteReg8
 
 #include <Arduino.h>
 #include <driver/gpio.h>
 
 namespace Es8311 {
 namespace {
+
+// Some boards gate the codec's own supply behind a GPIO (the NM-EPD-420 does,
+// on 44). It has to be high before the first register access or the chip-ID
+// read fails and begin() reports a missing codec.
+void codecRailEnable() {
+#if defined(BOARD_PIN_CODEC_EN) && BOARD_PIN_CODEC_EN >= 0
+    gpio_config_t cfg = {};
+    cfg.mode = GPIO_MODE_OUTPUT;
+    cfg.pin_bit_mask = 1ULL << BOARD_PIN_CODEC_EN;
+    gpio_config(&cfg);
+    gpio_set_level((gpio_num_t)BOARD_PIN_CODEC_EN, 1);
+    delay(10);
+#endif
+}
+
 
 // Register map subset — names follow Espressif's es8311_reg.h so the sequence
 // below can be diffed against the upstream driver.
@@ -160,8 +175,30 @@ bool configSampleRate(uint32_t rate) {
 
 bool ready() { return s_ready; }
 
+bool present() {
+    // Tri-state cache: unknown until the first probe, then sticky. A board whose
+    // codec is genuinely absent must not be re-probed on every capability
+    // report, and one that answered must not lose the capability to a transient
+    // bus collision.
+    static int8_t s_present = -1;
+    if (s_present >= 0) return s_present == 1;
+    codecRailEnable();
+    uint8_t id1 = 0, id2 = 0;
+    const bool ok = rd(REGFD_CHIP_ID1, &id1) && rd(REGFE_CHIP_ID2, &id2) &&
+                    id1 == 0x83 && id2 == 0x11;
+    s_present = ok ? 1 : 0;
+    if (!ok) {
+        Serial.printf("[ES8311] probe at 0x%02X found no codec (FD=0x%02X FE=0x%02X) "
+                      "— audio_out will not be claimed\n", ADDR, id1, id2);
+    } else {
+        Serial.printf("[ES8311] probe at 0x%02X: codec present\n", ADDR);
+    }
+    return ok;
+}
+
 bool begin(uint32_t sampleRate) {
     s_ready = false;
+    codecRailEnable();
 
     // Identity first. Writing a config sequence into whatever happens to ACK at
     // 0x18 is how you brick an unrelated part — 0x18 is also a common LIS3DH

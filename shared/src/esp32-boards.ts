@@ -234,6 +234,7 @@ export const ESP32_BOARDS: Esp32BoardSpec[] = [
       'The official ED047TC2 driver consumes one persistent 4-bit 259200-byte framebuffer allocated once in PSRAM.',
       'Flash transport is DIO. Do not override the merged image header to QIO; the owned V2.4 unit watchdog-reset until reflashed as DIO.',
       'GPIO21 is the only app/wake button; GPIO0 is bootloader recovery and RST is hard reset. No onboard microphone, codec or speaker amplifier path.',
+      'The GT911 touch panel is a separate 8-pin 0.5mm FPC into header P6, not part of the display tail. An unseated FPC is indistinguishable in firmware from a no-touch SKU or a dead controller: the full 0x08-0x77 sweep simply returns the PCF8563 RTC at 0x51 alone. Reseat P6 and power-cycle 3V3 before treating touch silence as a firmware problem.',
       'The 16MB layout carries two 6.25MB OTA slots; USB remains the recovery path.',
     ],
   },

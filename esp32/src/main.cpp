@@ -26,6 +26,9 @@
 #include "ui/matrix/matrix_display.h"
 #elif defined(BOARD_EINK_SURFACE)
 #include "ui/eink/eink_display.h"
+#if defined(BOARD_HAS_SPEAKER)
+#include "audio/speaker_playback.h"
+#endif
 #elif defined(BOARD_T_EMBED)
 #include "ui/display.h"
 #include "ui/knob/knob_ui.h"
@@ -1062,6 +1065,16 @@ static void uiTask(void* param) {
 static void uiTask(void* param) {
     Serial.println("[UI] InkDeck e-ink task started on core 1");
     Eink::init();
+#if defined(BOARD_HAS_SPEAKER)
+    // Runs on the UI task, after the first panel cycle, for the same reason the
+    // EPD47 probes touch here: the codec shares an I2C bus with panel-adjacent
+    // parts and this is the one context that is not contending with them.
+    // playbackInit() reads the ES8311 chip ID and leaves playbackReady() false
+    // when nothing answers, so `audio_out` is claimed only by a board that
+    // actually has a working codec — an unprobed I2C address degrades to no
+    // capability rather than to a broken board.
+    Audio::playbackInit();
+#endif
 
     uint32_t lastFrameMs = millis();
     while (true) {

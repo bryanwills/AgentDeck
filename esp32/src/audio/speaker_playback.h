@@ -20,6 +20,13 @@ bool playbackInit();
 /** True once the buffer exists — gates the `audio_out` capability we advertise. */
 bool playbackReady();
 
+// Whether this board can actually make a sound, as opposed to whether it can
+// accept samples. playbackReady() is the transport question — it is true as soon
+// as the ring buffer exists, which is also true on a board whose codec never
+// answered. `audio_out` on the wire must mean the former, or a device advertises
+// a speaker it does not have and the reply is dropped into silence.
+bool speakerAudible();
+
 /** Start an utterance. Discards anything still queued from a previous one. */
 void playbackBegin(uint32_t sampleRate);
 

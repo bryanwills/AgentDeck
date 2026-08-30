@@ -41,10 +41,17 @@ bool SimEink::renderToPng(const char* scene, const char* path) {
   const int W = display.hostWidth(), H = display.hostHeight();
   if (!buf) return false;
 
-  // 1-bit (0 = black ink, 1 = white paper) → RGB565 for the shared PNG writer.
+  // Host ink codes (0..15 grayscale level, 16 = red) → RGB565 for the shared
+  // PNG writer. Red appears only on the tri-color NM face and intermediate
+  // levels only on the EPD47; the other panels emit 0/15 alone, so this is a
+  // no-op for them.
   uint16_t* img = static_cast<uint16_t*>(std::malloc((size_t)W * H * sizeof(uint16_t)));
   if (!img) return false;
-  for (int i = 0; i < W * H; i++) img[i] = buf[i] ? 0xFFFF : 0x0000;
+  for (int i = 0; i < W * H; i++) {
+    if (buf[i] == 16) { img[i] = 0xF800; continue; }
+    const uint8_t g = (uint8_t)(buf[i] * 17);         // 0..15 → 0..255
+    img[i] = (uint16_t)(((g & 0xF8) << 8) | ((g & 0xFC) << 3) | (g >> 3));
+  }
   bool ok = SimPng::writeRgb565(path, img, W, H);
   std::free(img);
   return ok;
