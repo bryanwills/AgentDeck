@@ -21,7 +21,7 @@
     "s2Note": "As apps de desktop também contam: o macOS deteta sessões do Codex a partir da app ChatGPT assim que a integração do Codex estiver registada — a instalação por terminal trata disso, e a app da App Store pergunta nas Definições.",
     "s3Title": "Preencha as suas teclas",
     "s3Body": "Largue a ação AgentDeck em todas as teclas que quiser usar — é a única ação que existe, e cada tecla decide por si o que mostrar. O esquema distribui-se exatamente pelas teclas que colocou: primeiro uma por sessão, depois as teclas de resposta, modo, paragem e utilização, conforme o espaço.",
-    "s3Note": "Antes dos passos 1 e 2 estarem feitos, a tecla central mostra OFFLINE e as restantes ficam esbatidas. É o plugin a funcionar — está a dizer-lhe que falta o daemon.",
+    "s3Note": "Antes dos passos 1 e 2 estarem feitos, todas as teclas formam um único cartão OFFLINE escuro. É o plugin a funcionar — está a dizer-lhe que falta o daemon.",
     "thin": "O AgentDeck é um cliente leve, como um plugin do OBS: desenha o que o daemon local reporta e não inclui daemon nenhum.",
     "copy": "Copiar",
     "copied": "Copiado",

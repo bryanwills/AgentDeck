@@ -16,6 +16,7 @@
     "arch.daemon": { "en": "Daemon", "ko": "데몬", "ja": "デーモン" },
     "arch.protocol": { "en": "Bridge protocol", "ko": "브리지 규약", "ja": "ブリッジ規約" },
     "spec.surface-protocol": { "en": "Surface protocol", "ko": "Surface 규약", "ja": "Surface 規約" },
+    "spec.eink-surface": { "en": "E-ink surfaces", "ko": "E-ink 표면", "ja": "E-ink サーフェス" },
     "arch.gateway-protocol": { "en": "Gateway protocol", "ko": "Gateway 규약", "ja": "Gateway 規約" },
     "spec.wire-compatibility": { "en": "Wire compatibility", "ko": "와이어 호환성", "ja": "ワイヤ互換性" },
     "arch.apme": { "en": "APME", "ko": "APME", "ja": "APME" },
@@ -118,6 +119,12 @@
       "id": "spec.surface-protocol",
       "sources": {
         "en": "docs/surface-protocol.md"
+      }
+    },
+    {
+      "id": "spec.eink-surface",
+      "sources": {
+        "en": "docs/eink-surface-contract.md"
       }
     },
     {

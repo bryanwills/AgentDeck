@@ -9,6 +9,7 @@
 #include "../../camera/photo_capture.h"
 #include "../display.h"
 #include "../theme.h"
+#include "../widgets/connection_card.h"
 #include "../agent_label.h"
 #include "../../util/utf8.h"
 
@@ -336,15 +337,13 @@ static uint32_t stateColorOf(const char* state) {
 
 static void renderFocusPage(const FocusSnap& f, bool connected) {
     if (!connected) {
-        lv_obj_t* l = makeLabel(s_body, &lv_font_montserrat_16, Theme::HUDDim,
-                                "Searching for AgentDeck...");
-        lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
+        ConnectionCard::render(
+            s_body, 480, BODY_H, "OFFLINE", "Searching for AgentDeck...");
         return;
     }
     if (!f.have) {
-        lv_obj_t* l = makeLabel(s_body, &lv_font_montserrat_16, Theme::HUDDim,
-                                "No active sessions");
-        lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
+        ConnectionCard::render(
+            s_body, 480, BODY_H, "NO ACTIVE SESSIONS", "AgentDeck connected", true);
         return;
     }
 
@@ -482,9 +481,8 @@ static void renderSessionsPage() {
     appendHidden(hiddenReady, "ready");
 
     if (n == 0) {
-        lv_obj_t* l = makeLabel(s_body, &lv_font_montserrat_14, Theme::HUDDim,
-                                "No active sessions");
-        lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
+        ConnectionCard::render(
+            s_body, 480, BODY_H, "NO ACTIVE SESSIONS", "AgentDeck connected", true);
         return;
     }
 
@@ -1000,7 +998,11 @@ void update(float dt) {
         lockState();
         bool connectedNow = g_state.wsConnected;
         unlockState();
-        if (s_page == 0) renderFocusPage(focus, connectedNow);
+        if (!connectedNow) {
+            ConnectionCard::render(
+                s_body, 480, BODY_H, "OFFLINE",
+                wifiUp ? "Searching for AgentDeck..." : "No WiFi · connect USB");
+        } else if (s_page == 0) renderFocusPage(focus, true);
         else if (s_page == 1) renderUsagePage();
         else if (s_page == PAGE_CAM) renderCameraPage();
         else renderSessionsPage();

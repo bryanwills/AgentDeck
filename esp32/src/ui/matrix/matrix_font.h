@@ -42,7 +42,9 @@ static const uint16_t PROGMEM GLYPHS[] = {
     // M
     G(0b101, 0b111, 0b111, 0b101, 0b101),
     // N
-    G(0b101, 0b111, 0b111, 0b101, 0b101),
+    // Deliberately asymmetric diagonal. The old double-join was identical to M
+    // at 3×5 and made OFFLINE's N look like a filled/smudged glyph.
+    G(0b101, 0b110, 0b101, 0b011, 0b101),
     // O
     G(0b010, 0b101, 0b101, 0b101, 0b010),
     // P

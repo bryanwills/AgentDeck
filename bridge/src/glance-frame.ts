@@ -43,6 +43,8 @@ export const GLANCE_FRAME_BOARDS: Record<string, FrameGeometry> = {
   xteink_x3: { width: 528, height: 792, landscape: false, rotateToPhysical: true },
   xteink_x4: { width: 800, height: 480, landscape: true },
   inkdeck: { width: 800, height: 480, landscape: true },
+  nm_epd_420: { width: 400, height: 300, landscape: true },
+  lilygo_epd47: { width: 960, height: 540, landscape: true },
 };
 
 // ===== Weather icons (vector, 1-bit friendly) =====

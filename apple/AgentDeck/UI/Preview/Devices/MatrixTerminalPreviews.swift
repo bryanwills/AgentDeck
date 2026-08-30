@@ -177,7 +177,7 @@ private struct PixooPixelGrid: View {
 // drawStateDot's attention floor: that dot is drawn only by renderUsage and
 // renderCodex, never by renderAgents.
 //
-// SYNC-HASH esp32/src/ui/matrix/matrix_pages.cpp 2a7dce26966db94028f0d69e351e394e6a702501
+// SYNC-HASH esp32/src/ui/matrix/matrix_pages.cpp 03f516c60d911db9ff2826ff734bfb7e7e8c4c7c
 // scripts/check-preview-mirror-sync.mjs fails CI when the origin above drifts
 // from this pin — re-verify AGENTS-page parity and bump the hash together.
 
@@ -240,6 +240,11 @@ struct UlanziMatrixPreview: View {
             }
         }
 
+        if selection.state == .disconnected {
+            drawOffline(ctx: &ctx, cellW: cellW, cellH: cellH)
+            return
+        }
+
         // Live-follow → real sessions (per-session agent + state); manual → the
         // synthesized palette. One creature per alive session, like the firmware.
         //
@@ -297,6 +302,35 @@ struct UlanziMatrixPreview: View {
                 rainbow: false,
                 cellW: cellW, cellH: cellH
             )
+        }
+    }
+
+    /// Firmware-exact 3×5 OFFLINE word plus four dim cyan edge pixels. The N
+    /// carries an open diagonal instead of the old M-shaped double join.
+    private func drawOffline(ctx: inout GraphicsContext, cellW: CGFloat, cellH: CGFloat) {
+        let glyphs: [Character: [UInt8]] = [
+            "O": [0b010, 0b101, 0b101, 0b101, 0b010],
+            "F": [0b111, 0b100, 0b110, 0b100, 0b100],
+            "L": [0b100, 0b100, 0b100, 0b100, 0b111],
+            "I": [0b111, 0b010, 0b010, 0b010, 0b111],
+            "N": [0b101, 0b110, 0b101, 0b011, 0b101],
+            "E": [0b111, 0b100, 0b110, 0b100, 0b111],
+        ]
+        let text = Array("OFFLINE")
+        let grey = Color(red: 40.0 / 255.0, green: 40.0 / 255.0, blue: 45.0 / 255.0)
+        let startX = (matrixW - (text.count * 4 - 1)) / 2
+        for (index, character) in text.enumerated() {
+            guard let rows = glyphs[character] else { continue }
+            for y in 0..<5 {
+                for x in 0..<3 where rows[y] & (0b100 >> x) != 0 {
+                    plot(ctx: &ctx, x: startX + index * 4 + x, y: 1 + y,
+                         color: grey, cellW: cellW, cellH: cellH)
+                }
+            }
+        }
+        let cyan = Color(red: 0, green: 22.0 / 255.0, blue: 28.0 / 255.0)
+        for (x, y) in [(0, 1), (31, 1), (0, 6), (31, 6)] {
+            plot(ctx: &ctx, x: x, y: y, color: cyan, cellW: cellW, cellH: cellH)
         }
     }
 

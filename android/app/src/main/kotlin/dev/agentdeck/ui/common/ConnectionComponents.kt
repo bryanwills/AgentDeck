@@ -123,7 +123,7 @@ fun ConnectionErrorMessage(
     if (lastError != null && connectionStatus == ConnectionStatus.DISCONNECTED) {
         val isEink = LocalIsEink.current
         Text(
-            text = lastError,
+            text = "Connection error · $lastError",
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
             color = if (isEink) MaterialTheme.colorScheme.onSurfaceVariant else AgentDeckColors.Red,
             modifier = modifier,

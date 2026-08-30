@@ -36,6 +36,8 @@ jobs:
           - { env: amoled, board: round_amoled, name: 'Round AMOLED', display: '1.8" 360x360 ST77916', ota: 'yes' }
           - { env: ips10, board: ips_10, name: 'IPS 10.1"', display: '10.1" 800x1280 JD9365', ota: 'yes' }
           - { env: inkdeck, board: inkdeck, name: 'InkDeck', display: '7.5" 800x480 e-ink UC8179', ota: 'yes' }
+          - { env: nm_epd_420, board: nm_epd_420, name: 'RockBase NM-EPD-420', display: '4.2" 400x300 tri-color e-ink GDEY042Z98', ota: 'no' }
+          - { env: lilygo_epd47, board: lilygo_epd47, name: 'LilyGo T5 ePaper S3', display: '4.7" 960x540 grayscale e-ink ED047TC2', ota: 'yes' }
           - { env: ttgo, board: ttgo_t_display, name: 'TTGO T-Display', display: '1.14" 240x135 ST7789', ota: 'yes' }
           - { env: led8x32, board: ulanzi_tc001, name: 'Ulanzi TC001', display: '32x8 WS2812B matrix', ota: 'yes' }
           - { env: t_embed, board: t_embed, name: 'T-Embed CC1101', display: '1.9" 320x170 ST7789', ota: 'yes' }

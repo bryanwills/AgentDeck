@@ -37,8 +37,14 @@
 #include "../ui/pocket/pocket_ui.h"
 #include "../camera/photo_capture.h"
 #endif
+#if defined(BOARD_LILYGO_EPD47)
+#include "../input/touch_strip.h"
+#endif
 #if defined(BOARD_IPS10)
 #include "../ui/display.h"         // UI::hwI2cProbe — audio-codec hardware probe
+#endif
+#if defined(BOARD_EINK_SURFACE)
+#include "../ui/eink/eink_display.h"
 #endif
 #if defined(BOARD_SPK_CODEC_ES8311)
 #include "../audio/speaker_playback.h"
@@ -1132,6 +1138,12 @@ static void sendDeviceInfo() {
             if (strcmp(g_state.sessions[i].state, "processing") == 0) processing++;
         resp["processingCount"] = processing;
     }
+#if defined(BOARD_EINK_SURFACE)
+    // Physical panel I/O since boot. These deliberately count inside the
+    // e-ink refresh choke point, after content/rate gating has admitted a draw.
+    resp["repaintCount"] = Eink::repaintCount();
+    resp["fullRefreshCount"] = Eink::fullRefreshCount();
+#endif
     if (Net::wifiConnected()) {
         resp["ip"] = Net::wifiLocalIP();
     }
@@ -1190,6 +1202,24 @@ static void sendDeviceInfo() {
             resp["usbPowered"] = ps.usbPowered;
         } else {
             resp["batteryDiag"] = ps.gaugeErr;
+        }
+    }
+#endif
+#if defined(BOARD_LILYGO_EPD47)
+    {
+        resp["touchReady"] = Input::touchReady();
+        resp["touchDownSamples"] = Input::touchDownSamples();
+        resp["touchGestures"] = Input::touchGestures();
+        resp["touchLastX"] = Input::touchLastX();
+        resp["touchLastY"] = Input::touchLastY();
+        resp["touchMaxX"] = Input::touchMaxX();
+        resp["touchMaxY"] = Input::touchMaxY();
+        resp["touchAddress"] = Input::touchAddress();
+        resp["touchI2cDeviceCount"] = Input::touchI2cDeviceCount();
+        resp["touchRtcSeen"] = Input::touchRtcSeen();
+        if (Input::touchReady()) {
+            JsonArray caps = resp["capabilities"].to<JsonArray>();
+            caps.add("touch");
         }
     }
 #endif

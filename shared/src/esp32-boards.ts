@@ -203,6 +203,41 @@ export const ESP32_BOARDS: Esp32BoardSpec[] = [
     ],
   },
   {
+    id: 'nm_epd_420', env: 'nm_epd_420', name: 'RockBase NM-EPD-420',
+    display: '4.2" 400x300 tri-color e-ink GDEY042Z98',
+    aliases: [],
+    chipFamily: 'ESP32-S3', flashSize: '16MB', flashMode: 'dio', flashFreq: '80m',
+    bootloaderOffset: 0x0, uploadBaud: 115200, esptoolFlags: [],
+    before: 'default_reset', after: 'hard_reset', stub: true, nativeUsb: true,
+    ota: false,
+    webFlash: false, webFlashStatus: 'unverified',
+    webFlashVerified:
+      '2026-08-30 · owned hardware identified as ESP32-S3 rev v0.2 with 16MB flash and 8MB PSRAM; full factory flash backed up before the first AgentDeck write. Browser flashing has not been measured.',
+    notes: [
+      'Standard tri-color SKU: every admitted repaint is a full-window refresh; the firmware rate gate is 10 seconds.',
+      'BOOT/GPIO0 is RTC wake + primary/PTT; USER/GPIO45 is the invariant escape control. ES8311 is full-duplex I2S and the speaker PA enable is GPIO41.',
+      'The huge-app layout has one 3MB app slot; USB is the recovery/update path.',
+    ],
+  },
+  {
+    id: 'lilygo_epd47', env: 'lilygo_epd47', name: 'LilyGo T5 ePaper S3',
+    display: '4.7" 960x540 grayscale e-ink ED047TC2',
+    aliases: ['epd47'],
+    chipFamily: 'ESP32-S3', flashSize: '16MB', flashMode: 'dio', flashFreq: '80m',
+    bootloaderOffset: 0x0, uploadBaud: 115200, esptoolFlags: [],
+    before: 'default_reset', after: 'hard_reset', stub: true, nativeUsb: true,
+    ota: true,
+    webFlash: false, webFlashStatus: 'unverified',
+    webFlashVerified:
+      '2026-08-30 · owned V2.4 N16R8 hardware identified as ESP32-S3 rev v0.2 with 16MB flash and 8MB embedded PSRAM; full factory flash backed up before the first AgentDeck write. The built image header and physical boot are DIO: forcing QIO caused a TG0WDT reset loop, while DIO recovered immediately and remained stable. Browser flashing has not been measured.',
+    notes: [
+      'The official ED047TC2 driver consumes one persistent 4-bit 259200-byte framebuffer allocated once in PSRAM.',
+      'Flash transport is DIO. Do not override the merged image header to QIO; the owned V2.4 unit watchdog-reset until reflashed as DIO.',
+      'GPIO21 is the only app/wake button; GPIO0 is bootloader recovery and RST is hard reset. No onboard microphone, codec or speaker amplifier path.',
+      'The 16MB layout carries two 6.25MB OTA slots; USB remains the recovery path.',
+    ],
+  },
+  {
     id: 'ttgo_t_display', env: 'ttgo', name: 'TTGO T-Display', display: '1.14" 240x135 ST7789',
     aliases: ['ttgo'],
     chipFamily: 'ESP32', flashSize: '16MB', flashMode: 'dio', flashFreq: '80m',

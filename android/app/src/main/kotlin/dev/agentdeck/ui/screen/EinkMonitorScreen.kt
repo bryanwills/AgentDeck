@@ -760,7 +760,7 @@ private fun EinkNotConnectedScreen(
         // Error message from last connection attempt
         if (lastError != null && connectionStatus == ConnectionStatus.DISCONNECTED) {
             Text(
-                text = lastError,
+                text = "Connection error · $lastError",
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.onSurface,
             )

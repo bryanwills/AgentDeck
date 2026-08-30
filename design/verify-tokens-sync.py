@@ -1129,8 +1129,8 @@ def self_test() -> int:
          "stray hex: #deadbe"),
         ("css-root-drift",
          apme,
-         lambda s: s.replace("--ink-900:#0e1f1f;", "--ink-900:#deadbe;"),
-         "--ink-900 = #deadbe — canonical is #0e1f1f"),
+         lambda s: s.replace("--ink-800:#15302f;", "--ink-800:#deadbe;"),
+         "--ink-800 = #deadbe — canonical is #15302f"),
         ("css-root-stray",
          sdpi,
          lambda s: s + "\n:root { --bogus: #ff00ff; }\n",
@@ -1206,8 +1206,8 @@ def self_test() -> int:
         ("css-root-html-comment-in-root",
          apme,
          lambda s: s.replace(
-             "--ink-900:#0e1f1f;",
-             "--ink-900:#0e1f1f;<!-- raw:#deadbe -->",
+             "--ink-800:#15302f;",
+             "--ink-800:#15302f;<!-- raw:#deadbe -->",
              1,
          ),
          "orphan #deadbe inside :root"),
@@ -1217,7 +1217,11 @@ def self_test() -> int:
     for name, path, mutate, expected in cases:
         original = path.read_text()
         try:
-            path.write_text(mutate(original))
+            mutated = mutate(original)
+            if mutated == original:
+                failures.append(f"{name}: mutation produced no change (stale fixture)")
+                continue
+            path.write_text(mutated)
             rc, output = _run_subprocess()
             if rc == 0:
                 failures.append(f"{name}: verifier returned 0 (drift undetected)")

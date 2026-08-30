@@ -152,7 +152,7 @@ export class StateStore {
   toLayoutInput(selectedSessionId?: string): Record<string, unknown> {
     // Daemon down → force DISCONNECTED so the deck shows OFFLINE, not a stale list.
     if (!this.connected) {
-      return { state: 'DISCONNECTED', allSessions: [] };
+      return { state: 'DISCONNECTED', daemonConnected: false, allSessions: [] };
     }
     let totalTokens = this.usage.totalTokens as number | undefined;
     if (totalTokens == null && (this.usage.inputTokens != null || this.usage.outputTokens != null)) {
@@ -180,6 +180,10 @@ export class StateStore {
       : this.lastState;
     return {
       ...selected,
+      // Keep transport availability separate from the daemon's aggregate
+      // session state. `state:'disconnected'` with an empty roster is a healthy,
+      // connected daemon waiting for work; only this flag may select OFFLINE.
+      daemonConnected: this.connected,
       allSessions: this.sessionsWithPendingReview(),
       totalTokens,
       totalCost: (this.usage.totalCost as number) ?? (selected.totalCost as number) ?? 0,

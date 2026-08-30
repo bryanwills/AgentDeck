@@ -133,11 +133,13 @@ describe('handleSerialLine (source)', () => {
 
   it('parses device_info message and updates deviceInfo', () => {
     const conn = mockConn();
-    handleSerialLine(conn, '{"type":"device_info","board":"86box","version":"1.0.0","wifiConfigured":false,"wifiConnected":false}');
+    handleSerialLine(conn, '{"type":"device_info","board":"inkdeck","version":"1.0.0","wifiConfigured":false,"wifiConnected":false,"repaintCount":2757,"fullRefreshCount":461}');
 
     expect(conn.deviceInfo).not.toBeNull();
-    expect(conn.deviceInfo!.board).toBe('86box');
+    expect(conn.deviceInfo!.board).toBe('inkdeck');
     expect(conn.deviceInfo!.version).toBe('1.0.0');
+    expect(conn.deviceInfo!.repaintCount).toBe(2757);
+    expect(conn.deviceInfo!.fullRefreshCount).toBe(461);
   });
 
   it('skips debug lines (non-JSON)', () => {

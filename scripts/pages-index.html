@@ -11,7 +11,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentDeck — Stop Chatting. Start Steering.</title>
-<meta name="description" content="AgentDeck is a physical control surface for AI coding agents — one bridge, 27 display surfaces: Stream Deck+, e-ink readers, tablets, ESP32 displays, LED matrices, HID decks, and terminals.">
+<meta name="description" content="AgentDeck is a physical control surface for AI coding agents — one bridge, 29 display surfaces: Stream Deck+, e-ink readers, tablets, ESP32 displays, LED matrices, HID decks, and terminals.">
 <!--
   Social cards. Absolute URLs are required: og:image is fetched by crawlers that
   have no page context, so a relative path silently yields a bare link preview.
@@ -20,12 +20,12 @@
 <meta property="og:site_name" content="AgentDeck">
 <meta property="og:url" content="https://puritysb.github.io/AgentDeck/">
 <meta property="og:title" content="AgentDeck — Stop Chatting. Start Steering.">
-<meta property="og:description" content="Put your AI coding agents on a physical control surface. One local daemon renders every Claude Code, Codex, and OpenCode session live across 27 surfaces — and lets you steer them.">
+<meta property="og:description" content="Put your AI coding agents on a physical control surface. One local daemon renders every Claude Code, Codex, and OpenCode session live across 29 surfaces — and lets you steer them.">
 <meta property="og:image" content="https://puritysb.github.io/AgentDeck/media/setup-full.jpg">
 <meta property="og:image:alt" content="A desk running AgentDeck across many surfaces at once — Stream Deck+, Ulanzi D200H, tablets, e-ink panels, ESP32 displays, and LED matrices">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="AgentDeck — Stop Chatting. Start Steering.">
-<meta name="twitter:description" content="Put your AI coding agents on a physical control surface. One local daemon, 27 live display surfaces.">
+<meta name="twitter:description" content="Put your AI coding agents on a physical control surface. One local daemon, 29 live display surfaces.">
 <meta name="twitter:image" content="https://puritysb.github.io/AgentDeck/media/setup-full.jpg">
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -291,7 +291,7 @@
     <h1>Stop Chatting.<br><span class="tagline">Start Steering.</span></h1>
     <p class="lede" data-i18n="hero.lede">
       AgentDeck puts your coding agents on the desk. One daemon hub renders every session live
-      across 27 surfaces — and lets you steer them without leaving the keyboard.
+      across 29 surfaces — and lets you steer them without leaving the keyboard.
     </p>
     <div class="cta">
       <a class="btn btn-primary" href="#get-agentdeck" data-i18n="cta.start">Choose your setup</a>
@@ -335,7 +335,7 @@
       </div>
     </section>
     <div class="stats">
-      <div class="stat"><div class="n">27</div><div class="l" data-i18n="stat.surfaces">display surfaces</div></div>
+      <div class="stat"><div class="n">29</div><div class="l" data-i18n="stat.surfaces">display surfaces</div></div>
       <div class="stat"><div class="n">4</div><div class="l" data-i18n="stat.agents">coding agents</div></div>
       <div class="stat"><div class="n">100%</div><div class="l" data-i18n="stat.local">local — no cloud</div></div>
     </div>
@@ -380,7 +380,7 @@
     </a>
   </div>
 
-  <h2 data-i18n="surf.h">27 surfaces, one bridge</h2>
+  <h2 data-i18n="surf.h">29 surfaces, one bridge</h2>
   <p class="section-lede" data-i18n="surf.p">The same session state renders natively on each, and they run simultaneously — counted from the canonical compatibility matrix. Each app chip is a separately designed UI; the XTeink readers run the community CrossPoint fork.</p>
   <div class="surfaces">
     <div class="chip"><b>Stream Deck+</b><span>8 keys · 4 dials</span></div>
@@ -403,6 +403,8 @@
     <div class="chip"><b>T-Embed Companion Knob</b><span>320×170 · encoder</span></div>
     <div class="chip"><b>T-Display-S3-Pro Focus Strip</b><span>480×222 · touch</span></div>
     <div class="chip"><b>InkDeck e-ink</b><span>800×480 · WiFi OTA</span></div>
+    <div class="chip"><b>RockBase NM-EPD-420</b><span>400×300 · tri-color e-ink</span></div>
+    <div class="chip"><b>LilyGo T5 ePaper S3</b><span>960×540 · grayscale e-ink</span></div>
     <div class="chip"><b>XTeink X3</b><span>528×792 e-ink · fork</span></div>
     <div class="chip"><b>XTeink X4</b><span>480×800 e-ink · fork</span></div>
     <div class="chip"><b>Divoom Pixoo64</b><span>64×64 LED</span></div>
@@ -466,7 +468,7 @@
     var I18N = {
       ko: {
         'hero.kicker': 'AI 코딩 에이전트를 위한 피지컬 컨트롤 서피스',
-        'hero.lede': 'AgentDeck은 코딩 에이전트를 책상 위로 꺼내 놓습니다. 하나의 데몬 허브가 모든 세션을 27개 서피스에 라이브로 렌더링하고 — 키보드를 떠나지 않고 조종하게 해줍니다.',
+        'hero.lede': 'AgentDeck은 코딩 에이전트를 책상 위로 꺼내 놓습니다. 하나의 데몬 허브가 모든 세션을 29개 서피스에 라이브로 렌더링하고 — 키보드를 떠나지 않고 조종하게 해줍니다.',
         'cta.start': '내 환경에 맞게 시작하기',
         'cta.demo': '라이브 프리뷰 열기',
         'get.eyebrow': 'AgentDeck 시작하기',
@@ -506,13 +508,13 @@
         'card.health.p': '최신 CI 실행 — 통과한 테스트, 시나리오 커버리지, 추세, 알려진 갭.',
         'card.src.ci': '오픈소스',
         'card.src.p': 'GitHub의 MIT 라이선스 모노레포 — 브리지, 플러그인, 펌웨어, 앱.',
-        'surf.h': '27개 서피스, 하나의 브리지',
+        'surf.h': '29개 서피스, 하나의 브리지',
         'surf.p': '동일한 세션 상태가 각 서피스에 네이티브로 렌더링되며 동시에 구동됩니다 — 개수는 정본 호환성 매트릭스 기준입니다. 앱 칩은 각각 따로 설계된 UI이고, XTeink 리더는 커뮤니티 CrossPoint 포크로 구동됩니다.',
         'policy.canonical': '개인정보 처리방침은 영어 원문이 정본입니다.'
       },
       ja: {
         'hero.kicker': 'AIコーディングエージェントのためのフィジカルコントロールサーフェス',
-        'hero.lede': 'AgentDeckはコーディングエージェントを机の上に連れ出します。ひとつのdaemonハブがすべてのセッションを27のサーフェスにライブ描画し — キーボードを離れずに操縦させてくれます。',
+        'hero.lede': 'AgentDeckはコーディングエージェントを机の上に連れ出します。ひとつのdaemonハブがすべてのセッションを29のサーフェスにライブ描画し — キーボードを離れずに操縦させてくれます。',
         'cta.start': '環境に合わせて始める',
         'cta.demo': 'ライブプレビューを試す',
         'get.eyebrow': 'AgentDeckを始める',
@@ -552,7 +554,7 @@
         'card.health.p': '最新の CI 実行 — 通過したテスト、シナリオカバレッジ、推移、既知のギャップ。',
         'card.src.ci': 'オープンソース',
         'card.src.p': 'GitHubのMITライセンスmonorepo — ブリッジ、プラグイン、ファームウェア、アプリ。',
-        'surf.h': '27のサーフェス、ひとつのブリッジ',
+        'surf.h': '29のサーフェス、ひとつのブリッジ',
         'surf.p': '同じセッション状態が各サーフェスにネイティブ描画され、同時に動作します — 数は正本の互換性マトリクスに基づきます。アプリのチップはそれぞれ別設計のUIで、XTeinkリーダーはコミュニティのCrossPointフォークで動きます。',
         'policy.canonical': 'プライバシーポリシーは英語原文が正本です。'
       }

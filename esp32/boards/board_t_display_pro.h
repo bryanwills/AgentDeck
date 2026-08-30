@@ -57,9 +57,10 @@
 // White illumination LED on the shield (PWM-dimmed; full-on runs hot).
 #define BOARD_CAM_PIN_LED    38
 
-// Display settings — panel native 222x480 portrait; the ticker is
-// landscape-only (rotation → 480x222).
-#define BOARD_ROTATION       1
+// Display settings — panel native 222x480 portrait; the desk-mounted ticker
+// is landscape with USB-C entering from the left. Rotation 3 keeps that pose
+// upright. The camera-backed Pocket path explicitly stays at rotation 0.
+#define BOARD_ROTATION       3
 #define BOARD_INVERT         true
 #define BOARD_NATIVE_W       222
 #define BOARD_NATIVE_H       480

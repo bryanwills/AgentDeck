@@ -214,7 +214,7 @@ struct D200HKeyPreview: View {
     private var slot: D200HKeySlot? {
         d200hDeckSlots(for: selection).first {
             if case .session = $0.kind { return true }
-            if case .offlineHero = $0.kind { return true }
+            if case .offlineGrid = $0.kind { return true }
             return false
         }
     }
@@ -288,7 +288,7 @@ private struct D200HSlotTile: View {
         switch slot.kind {
         case .session(_, let state, _):
             return StateColors.color(for: state).opacity(0.16)
-        case .offlineHero, .info:
+        case .offlineGrid(_, _, _, _), .info:
             return Color.black.opacity(0.5)
         case .usageGauge:
             return Color.black.opacity(0.42)
@@ -327,20 +327,12 @@ private struct D200HSlotTile: View {
                 }
             }
             .padding(size * 0.05)
-        case .offlineHero:
-            VStack(spacing: size * 0.05) {
-                AgentDeckLogo(size: size * 0.36, color: .white.opacity(0.9))
-                Text(slot.label)
-                    .font(.system(size: size * 0.12, weight: .heavy, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.85))
-                // "Open AgentDeck" — the real brand info slot shows this hint.
-                if let subtitle = slot.subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.system(size: size * 0.09))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .lineLimit(1)
-                }
-            }
+        case .offlineGrid(let col, let row, let cols, let rows):
+            D200HOfflineGridFragment(
+                col: col, row: row, cols: cols, rows: rows,
+                label: slot.label, subtitle: slot.subtitle ?? "",
+                size: size
+            )
         case .usageGauge(let agent, _, let percent, let known, let stale, let inactive, let footnote):
             // Mirrors renderUsageGauge (d200h-layout.ts): a vertical water-tank
             // fill rising from the bottom (severity ramp, 0.38 tint + crisp
@@ -468,5 +460,51 @@ private struct D200HSlotTile: View {
         if percent > 80 { return Color(red: 0xEF / 255.0, green: 0x44 / 255.0, blue: 0x44 / 255.0) }
         if percent > 50 { return Color(red: 0xEA / 255.0, green: 0xB3 / 255.0, blue: 0x08 / 255.0) }
         return Color(red: 0x22 / 255.0, green: 0xC5 / 255.0, blue: 0x5E / 255.0)
+    }
+}
+
+/// SwiftUI crop of the same logical full-deck card emitted by
+/// `renderOpenAppGrid`. Each key owns one viewport; the physical gaps between
+/// keys provide the same segmentation as the real D200H LCD buttons.
+private struct D200HOfflineGridFragment: View {
+    let col: Int
+    let row: Int
+    let cols: Int
+    let rows: Int
+    let label: String
+    let subtitle: String
+    let size: CGFloat
+
+    var body: some View {
+        let totalW = size * CGFloat(cols)
+        let totalH = size * CGFloat(rows)
+        let minDim = CGFloat(min(cols, rows))
+        let scale = max(1, minDim * 0.8)
+
+        ZStack {
+            Color(red: 0.028, green: 0.102, blue: 0.118)
+            RoundedRectangle(cornerRadius: 14 * scale, style: .continuous)
+                .fill(Color(red: 0.055, green: 0.18, blue: 0.20).opacity(0.68))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14 * scale, style: .continuous)
+                        .stroke(DesignTokens.UI.cyan.opacity(0.28), lineWidth: 1.2 * scale)
+                )
+                .padding(.horizontal, max(4, 4 * CGFloat(cols) / 4))
+                .padding(.vertical, max(4, 4 * CGFloat(rows) / 2))
+
+            VStack(spacing: 5 * scale) {
+                AgentDeckLogo(size: 32 * scale, color: DesignTokens.UI.cyan.opacity(0.9))
+                Text(label)
+                    .font(.system(size: 18 * minDim / 2, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.88))
+                Text(subtitle)
+                    .font(.system(size: 10 * minDim / 2, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+        }
+        .frame(width: totalW, height: totalH)
+        .offset(x: -CGFloat(col) * size, y: -CGFloat(row) * size)
+        .frame(width: size, height: size, alignment: .topLeading)
+        .clipped()
     }
 }

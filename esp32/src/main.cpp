@@ -24,7 +24,7 @@
 
 #ifdef BOARD_LED8X32
 #include "ui/matrix/matrix_display.h"
-#elif defined(BOARD_INKDECK)
+#elif defined(BOARD_EINK_SURFACE)
 #include "ui/eink/eink_display.h"
 #elif defined(BOARD_T_EMBED)
 #include "ui/display.h"
@@ -57,7 +57,7 @@
 DashboardState g_state;
 SemaphoreHandle_t g_stateMutex = nullptr;
 
-#if !defined(BOARD_LED8X32) && !defined(BOARD_INKDECK) && !defined(BOARD_T_EMBED) && !defined(BOARD_T_DISPLAY_PRO)
+#if !defined(BOARD_LED8X32) && !defined(BOARD_EINK_SURFACE) && !defined(BOARD_T_EMBED) && !defined(BOARD_T_DISPLAY_PRO)
 // ===== Screen objects (LVGL boards only) =====
 static lv_obj_t* scrSplash = nullptr;
 static lv_obj_t* scrAquarium = nullptr;
@@ -705,7 +705,7 @@ static void uiTask(void* param) {
         vTaskDelay(pdMS_TO_TICKS(work < RENDER_INTERVAL_MS ? (RENDER_INTERVAL_MS - work) : 1));
     }
 }
-#elif !defined(BOARD_LED8X32) && !defined(BOARD_INKDECK)
+#elif !defined(BOARD_LED8X32) && !defined(BOARD_EINK_SURFACE)
 // ===== Settings long-press handler =====
 static void onLongPress(lv_event_t* e) {
 #if defined(BOARD_IPS10)
@@ -1055,7 +1055,7 @@ static void uiTask(void* param) {
         vTaskDelay(pdMS_TO_TICKS(RENDER_INTERVAL_MS));
     }
 }
-#else // BOARD_INKDECK
+#else // BOARD_EINK_SURFACE
 // ===== UI task — e-ink dashboard (Core 1) =====
 // Slow tick: render() is content-hash gated internally and a panel refresh
 // blocks 0.3-3s, so there is nothing to gain from the 30fps LCD cadence.
@@ -1085,7 +1085,7 @@ void setup() {
     pinMode(BOARD_PIN_PWR_EN, OUTPUT);
     digitalWrite(BOARD_PIN_PWR_EN, HIGH);
 #endif
-#if defined(BOARD_INKDECK) || defined(BOARD_IPS10) || defined(BOARD_T_EMBED) || defined(BOARD_T_DISPLAY_PRO)
+#if defined(BOARD_EINK_SURFACE) || defined(BOARD_IPS10) || defined(BOARD_T_EMBED) || defined(BOARD_T_DISPLAY_PRO)
 #if defined(BOARD_T_EMBED)
     // 16384 on the only board that receives *audio* over serial. A spoken reply
     // arrives at ~44 KB/s (base64 PCM), so an 8 KB ring covers only ~190 ms of
@@ -1133,6 +1133,14 @@ void setup() {
     // CH340 UART: no CDC wait needed
     delay(200);
     Serial.println("\n=== AgentDeck 86 Box 4\" ===");
+#elif defined(BOARD_NM_EPD_420)
+    for (int i = 0; i < 30 && !Serial; i++) delay(100);
+    delay(200);
+    Serial.println("\n=== AgentDeck NM-EPD-420 4.2\" e-ink ===");
+#elif defined(BOARD_LILYGO_EPD47)
+    for (int i = 0; i < 30 && !Serial; i++) delay(100);
+    delay(200);
+    Serial.println("\n=== AgentDeck LilyGo T5 4.7\" e-ink ===");
 #elif defined(BOARD_INKDECK)
     // Native USB CDC: wait for host connection (up to 3 seconds)
     for (int i = 0; i < 30 && !Serial; i++) delay(100);
@@ -1162,6 +1170,10 @@ void setup() {
         "TTGO T-Display",
 #elif defined(BOARD_ESP32_C6_147)
         "ESP32-C6 1.47\"",
+#elif defined(BOARD_NM_EPD_420)
+        "NM-EPD-420 4.2\" e-ink",
+#elif defined(BOARD_LILYGO_EPD47)
+        "LilyGo T5 4.7\" e-ink",
 #elif defined(BOARD_INKDECK)
         "InkDeck 7.5\" e-ink",
 #elif defined(BOARD_T_EMBED)
@@ -1177,7 +1189,7 @@ void setup() {
 #else
         "Unknown",
 #endif
-#if defined(BOARD_LED8X32) || defined(BOARD_INKDECK)
+#if defined(BOARD_LED8X32) || defined(BOARD_EINK_SURFACE)
         SCREEN_W, SCREEN_H);
 #else
         g_screenW, g_screenH);

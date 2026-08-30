@@ -191,12 +191,7 @@ export class DaemonWsClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    if (this.ws) {
-      this.ws.removeAllListeners();
-      // ws throws if closed while still CONNECTING — terminate covers that case.
-      try { this.ws.close(); } catch { try { this.ws.terminate(); } catch { /* ignore */ } }
-      this.ws = null;
-    }
+    this.disposeSocket();
     this.registered = false;
     this.focused = false;
   }
@@ -242,8 +237,7 @@ export class DaemonWsClient {
       return;
     }
     if (this.ws) {
-      this.ws.removeAllListeners();
-      this.ws.close();
+      this.disposeSocket();
     }
 
     const { host, port, token } = this.target;
@@ -342,6 +336,23 @@ export class DaemonWsClient {
   private sendRegister(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     this.ws.send(JSON.stringify(this.buildRegisterFrame()));
+  }
+
+  private disposeSocket(): void {
+    const socket = this.ws;
+    if (!socket) return;
+    this.ws = null;
+    socket.removeAllListeners();
+    // Closing a CONNECTING `ws` emits an asynchronous error. Keep a sink
+    // attached after removing lifecycle handlers so shutdown cannot surface as
+    // an uncaught exception or schedule another reconnect.
+    socket.on('error', () => {});
+    try {
+      if (socket.readyState === WebSocket.CONNECTING) socket.terminate();
+      else socket.close();
+    } catch {
+      try { socket.terminate(); } catch { /* ignore */ }
+    }
   }
 
   private scheduleReconnect(): void {

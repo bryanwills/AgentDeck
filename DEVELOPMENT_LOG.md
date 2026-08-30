@@ -2,6 +2,166 @@
 
 ---
 
+## 2026-08-30 — Design token self-test가 생성 대시보드의 실제 primitive를 다시 변조한다
+
+`verify-tokens-sync.py --self-test`의 두 CSS-root 케이스가 예전에 제거된
+`--ink-900` 문자열을 계속 치환했다. fixture 변조가 no-op이어서 본 검증기가 정상
+종료했고, self-test는 이를 실제 drift를 놓친 것으로 보고 원격 Design System job을
+실패시켰다. 두 케이스를 현재 번들 대시보드에 존재하는 `--ink-800` primitive로
+옮기고, 앞으로 fixture가 다시 낡아도 원인을 즉시 드러내도록 모든 mutation에
+no-op guard를 추가했다.
+
+## 2026-08-30 — E-ink physical QA correction: cleared EPD47 transitions, explicit NM controls, InkDeck live-board restore
+
+- Physical review rejected the first EPD47/NM/InkDeck redesign build: EPD47 partial page writes retained old tab underlines/body text, NM's 400×300 offline footer overlapped the connection copy, and InkDeck exposed the internal `GLANCE` state as its product title.
+- EPD47 now performs a clearing full refresh for every automatic or manual page transition. When no supported touch controller answers the boot probe, GPIO21 cycles `FOCUS → QUEUE → LIMITS` and holds the chosen page for eight minutes, so the installed unit remains controllable while its touch hardware is investigated.
+- NM now shows the actual controls in a dedicated non-overlapping footer. Home: `BOOT PAGE / OPEN`, `USER HOME`. Decision: `BOOT NEXT`, then `USER SELECT` / `USER CONFIRM`; the second confirmation sends the session-scoped `select_option` command. The not-yet-enabled ES8311 microphone path is no longer promised by the retained UI.
+- InkDeck's default face again uses the proven live session grid with AgentDeck identity and provider limits. `GLANCE` remains an internal face/arbitration identifier only.
+- Host builds and board-sized renders passed for `inkdeck`, `nm_epd_420_preview`, and `lilygo_epd47_preview`. Release firmware was hash-verified on EPD47 (`/dev/cu.usbmodem21401`), NM (`/dev/cu.usbmodem83201`), and InkDeck (download `/dev/cu.usbmodem3111101`, runtime `/dev/cu.usbmodem1CDBD474F4D81`). After AgentDeck restart all three re-registered over Wi-Fi as fresh `1.0.8` / `3d975d47-dirty`; InkDeck also answered a direct USB `device_info_request` with build epoch `1788073652`.
+
+---
+
+## 2026-08-30 — EPD47이 wide touch sheet와 자율 LIMITS/FOCUS/QUEUE 정책을 갖는다
+
+LilyGo EPD47을 공용 roster 축소판에서 960×540 전용 work sheet로 바꿨다. 상단에는
+다른 AgentDeck 표면과 같은 mark/wordmark, `FOCUS`/`QUEUE`/`LIMITS` 탭, pull/link
+상태를 고정했다. 본문은 durable active work가 없으면 Claude/Codex의 5H/7D 사용량과
+reset을 보여주는 `LIMITS`, 하나면 creature와 요청/작업을 크게 보여주는 `FOCUS`,
+둘 이상이면 세션 3개를 정렬한 `QUEUE`를 자동 선택한다. 구조화된 질문은 터치 가능한
+`DECISION`으로 승격한다. 탭이나 옵션 터치는 8분 hold를 열고, hold가 끝나면 다시
+자율 페이지로 복귀한다. GPIO21은 모든 상태에서 자율 GLANCE로 돌아가는 escape이며
+GPIO47 touch IRQ는 deep-sleep wake로 과장하지 않는다.
+
+EPD47의 연결 종료 화면도 공용 디자인 언어로 맞췄다. paper-white 바탕, AgentDeck
+mark, 단일 `OFFLINE` 상태행, 실제 transport 단계만 말하는 보조행을 사용하며 세션
+creature는 Claude와 Codex의 canonical monochrome glyph를 재사용한다. 터치 탭은
+현재 GT911 주소 0x14/0x5D와 pinned vendor library의 legacy 0x5A를 부팅 시 고정 메모리
+scan으로 자동 감지하고, 성공한 경우에만 `touch` capability를 광고한다. 진단은
+`touchAddress`/`touchI2cDeviceCount`/`touchRtcSeen`으로 양 device_info 전송 경로에
+남긴다.
+
+host simulator의 EPD47 전용 env와 data-only page policy test를 추가했다. empty,
+offline, idle, display-off, working, multi, crowd, dense, permission 9장 모두 960×540으로
+렌더하고 layout test 및 diff whitespace gate를 통과했다. Release 빌드는 RAM 38.4%,
+Flash 21.6%이며 `/dev/cu.usbmodem21401`의 owned EPD47(MAC
+`a4:cb:8f:ef:7a:bc`)에 DIO로 hash-verified 배포했다.
+
+실기에서는 새 UI와 Wi-Fi/serial 상태 전송이 정상이나 touch controller는 응답하지
+않았다. 세 번의 전체 I2C scan과 IRQ low→high wake 뒤에도 RTC 0x51 하나만 발견되어
+`touchReady:false`, `touchAddress:0`, `touchI2cDeviceCount:1`, `touchRtcSeen:true`다.
+과거 기본 펌웨어에서 터치가 됐다는 관찰을 반영해 보존한 출고 앱을 잠시 복원하고,
+현재 LilyGo 저장소의 공식 `examples/touch`도 같은 앱 파티션에 올려 다시 비교했다.
+출고 앱은 calendar 빌드라 터치 진단을 하지 않았고, 공식 touch example은 현재 실기에서
+`Failed to find GT911`을 반복했다. 따라서 AgentDeck 드라이버만의 실패는 아니며, 현재
+연결 상태에서 제조사 코드도 GT911을 찾지 못한다. AgentDeck은 출고 demo처럼 첫 패널
+전원/전체 draw 뒤 0x14/0x5D/legacy 0x5A를 탐색하며, controller가 응답하면 재빌드 없이
+자동 활성화한다. 표준 NM-EPD-420은 제조사 README·회로도·factory test 모두 USER/BOOT
+두 버튼만 정의하고 touchscreen controller는 두지 않는다. board JSON의
+`use_1200bps_touch`는 화면 터치가 아니라 USB bootloader 진입 옵션이다.
+
+## 2026-08-30 — 기기별 OFFLINE은 하나의 문법을 쓰고 empty roster와 분리된다
+
+Daemon Offline 표현을 기기마다 별도 예외로 그리던 경로를 연결 상태 정본에 맞춰
+정리했다. 공통 문법은 emissive/color의 near-black 바탕(e-ink는 paper white), muted
+cyan AgentDeck rail, 하나의 큰 상태행과 최대 하나의 보조행이다. 직접 연결하는
+Apple/Android/ESP32는 실제 search/connect/
+reconnect 단계를 말할 수 있지만, daemon이 밀어주는 수동 디스플레이는 수행하지 않는
+재연결을 주장하지 않고 `OFFLINE`만 표시한다. 구체적인 연결 시도가 실패한 경우의
+raw error는 retry/manual-connect 조작이 있는 직접 연결 화면에만 남긴다.
+
+D200H는 가운데 한 키만 쓰던 offline 상태를 5×2 키 전체에 걸친 하나의 카드로 바꿨고,
+어느 키를 눌러도 companion을 연다. 동시에 plugin→daemon transport 상태를 aggregate
+session state와 분리하는 `daemonConnected`를 layout input에 추가했다. 따라서 daemon은
+살아 있지만 session이 0개인 경우 더는 offline으로 오판하지 않고 `HUB READY` /
+`NO SESSION` / `AgentDeck idle` 카드가 나온다. Ulanzi tutorial의 8개 locale도 실제
+full-deck 동작으로 맞췄다.
+
+T-Embed CC1101과 T-Display Pro는 같은 LVGL connection card를 사용하고, InkDeck은
+`OFFLINE` retained sheet와 live-daemon `no active sessions`를 분리했다. 특히 InkDeck의
+후속 refresh가 최초 offline sheet를 빈 roster로 덮던 실제 분기 오류를 수정했다.
+TC001/Pixoo64/iDotMatrix/Timebox는 소비전력을 늘리는 offline animation 없이 정적이고
+희소한 dark badge를 쓰며, 3×5 `N` glyph는 `M`과 같던 형태에서 명확한 대각선으로
+교정했다. Node와 Swift renderer/preview mirror가 같은 픽셀을 생성한다.
+
+검증: TypeScript/Vitest 238 files, 3,717 tests; macOS XCTest 707 tests(2 skipped),
+Android v1.0.10 release APK; preview mirror sync 10 pins; T-Embed/T-Display Pro/
+TC001/InkDeck host simulator offline frames. 네 ESP32 release 환경은 native
+PlatformIO toolchain으로 빌드했다.
+
+실기 배포는 daemon을 먼저 내려 수동 display가 passive offline 상태를 받게 한 뒤
+T-Embed(`/dev/cu.usbmodem314401`), T-Display Pro(`/dev/cu.usbmodem21301`),
+TC001(`/dev/cu.wchusbserial3130`), InkDeck(런타임 `/dev/cu.usbmodem1CDBD474F4D81`,
+다운로드 `/dev/cu.usbmodem3111101`), NM-EPD-420(`/dev/cu.usbmodem83201`),
+LilyGo EPD47(`/dev/cu.usbmodem21401`) 순으로 플래시했다. TC001은 115200 baud에서
+bootloader/partition/app 전체를 기록했고, 모든 write hash가 검증됐다. 최신 shared/
+bridge 빌드로 daemon을 재시작한 뒤 여섯 `device_info`가 모두
+`3d975d47-dirty`, fresh/open transport로 재등록되는 것까지 확인했다.
+
+## 2026-08-30 — E-ink 면은 push/pull별 상태 집합이 되고 패널 실측은 device_info가 맡는다
+
+후속 실물 방향 확인에서 LilyGo EPD47의 native scan 방향이 케이스의 읽기 방향과
+180° 반대임을 확인했다. 보드 정본에 `BOARD_EINK_ROTATION=2`를 두고 4-bit PSRAM
+canvas가 논리 좌표를 물리 좌표로 회전해 기록하도록 수정했으며, 960×540 host
+preview도 같은 raw panel orientation을 쓴다.
+
+InkDeck 24시간 실측에서 2,757회 재도색 중 행동 가능한 변경은 0.22%였고 이미지
+중앙 수명은 3초로 레이트리밋에 포화돼 있었다. 이를 단순 주기 튜닝 문제가 아니라
+면 상태기계 문제로 승격했다. `docs/eink-surface-contract.md`가 다섯 면
+(`DECISION`/`ANSWER`/`DIGEST`/`GLANCE`/`ROSTER`), 본문/밴드 경계, 8분 hold와
+expiry, 항상 같은 escape 의미를 정본으로 고정한다. 상시 연결 push는 다섯 면,
+딥슬립 pull은 세 면이 기본이며 물리 웨이크 뒤의 제한된 interactive lease에서만
+두 상호작용 면을 연다.
+
+실물/공식 자료 대조 결과 InkDeck은 push, RockBase NM-EPD-420과 LilyGo EPD47은
+pull 기본으로 분류했다. NM은 BOOT(GPIO0) wake/PTT와 USER(GPIO45) escape,
+EPD47은 GPIO21 wake/escape이며 온보드 오디오가 없어 PTT가 없다. 세 기기의
+모델·패널/방향, MCU/PSRAM, 전원, 딥슬립 웨이크, 마이크 경로, 스피커 앰프 enable은
+`docs/hardware-compatibility.md`의 e-ink 6필드 표로 고정했다. NM의 ES8311은
+full-duplex I2S이고 PA enable은 GPIO41이지만, 이번 display-first 타깃은 오디오
+드라이버를 켜지 않아 BOOT hold를 PTT에 예약만 한다.
+
+세 보드가 이제 하나의 paper-face 렌더러를 쓴다. InkDeck은 다섯 면을 모두 상시
+허용하고, pull 보드는 GLANCE/DIGEST/ROSTER를 기본으로 하되 물리 입력 뒤 8분
+interactive lease에서만 DECISION/ANSWER를 허용한다. 오프라인은 정적 ROSTER,
+escape와 expiry는 GLANCE다. 400×300 NM의 SSD1683 B/W differential 경로는 완전히
+금지했다. 전면 실험이 심한 깜빡임과 dark wash를 만든 뒤, red를 제외한 byte-aligned
+`(8,56) 392×244` 영역만 쓰고 old/new RAM을 같게 맞춘 2차 실험도 실물 사진에서 화면
+전체에 균일한 gray veil을 만들었다. 즉 `hasPartialUpdate`는 이 controller의 RAM 주소
+지정 능력이지 장착된 GDEY042Z98 tri-color glass의 파형 호환성 보장이 아니다. NM의
+custom 30,000바이트 B/W/color canvas와 모든 `refresh_bw()` 호출을 제거하고 정식 3색
+full waveform만 남겼다. 부팅 첫 회는 extended waveform으로 pigment plane을 복구하고,
+자동 변화는 5분 단위로 합치며 물리 키만 즉시 갱신한다. red는 상단 brand rail과
+DECISION 왼쪽 rail에 고정해 full-color 주기의 추가 비용 없이 사용한다.
+960×540 EPD47은 PSRAM에 259,200바이트
+4-bit 버퍼를 한 번만 할당하는 responsive layout을 사용한다. 이후 발견된 잔상은
+공장 화면이 아니라 `full` 요청에서도 실제 clear 없이 이전 AgentDeck 이미지를
+덮어쓴 결과였다. 이제 첫 프레임·연결 전환·4회/10분 주기 full refresh에서 vendor
+`epd_clear()` 후 새 이미지를 쓰고, 그 사이만 image-only 갱신한다.
+두 보드는 captive portal 대신 USB provisioning을 기본으로 하여 pull 전력 계약과
+Arduino 3 WiFiManager callback 안정성을 함께 지킨다.
+
+재설계 후 평가를 손재현하지 않도록 InkDeck의 실제 패널 I/O choke point에
+`repaintCount`/`fullRefreshCount` 부팅 이후 누적치를 추가했다. `device_info`의
+직렬·WiFi 경로를 Node/Swift 양 데몬에서 보존해 `/devices`와 module health로
+노출하며, 요청됐으나 gating에서 버려진 render는 세지 않는다.
+
+실기 배포 전에 LilyGo와 NM의 16MB factory flash를 각각 완전 백업하고 SHA-256을
+검증했다. 이후 LilyGo(`/dev/cu.usbmodem21401`, MAC a4:cb:8f:ef:7a:bc),
+NM(`/dev/cu.usbmodem83201`, MAC 68:ee:8f:5b:bc:a8), InkDeck(다운로드 노드
+`/dev/cu.usbmodem3111101`, MAC 1c:db:d4:74:f4:d8)에 순차 플래시했다. 부팅 실측은
+각각 16MB/8MB, 16MB/8MB, BSP 8MB/8MB이며, 세 `device_info` 모두 새 board id와
+refresh counters를 보고했다. NM은 단일 3MB app이라 OTA false, EPD47은 6.25MB
+dual OTA, InkDeck은 3.19MB dual OTA다.
+
+EPD47의 custom board와 최종 이미지 header는 flash DIO가 정본이다. 동일 app을
+강제로 QIO write했을 때 TG0WDT reset loop가 재현됐고 DIO로 다시 쓰자 즉시 안정
+부팅했다. PlatformIO의 `qio_opi` memory type은 octal PSRAM 배선을 뜻하며 flash
+transport를 QIO로 바꾸라는 의미가 아니다.
+
+검증: vitest 3,713건, Node typecheck, Swift `ESP32WifiForwardTests`, 세 e-ink
+PlatformIO release 빌드/실기 부팅, 11개 first-party host simulator frame,
+문서 링크/H1 및 design-system catalog coverage 게이트.
+
 ## 2026-08-29 — Work 판이 두 데몬 모두에서 서빙되고, 태스크 이름 규칙은 생성 미러가 된다
 
 Work 판(`/apme` 기본 탭)은 Node가 9120을 잡은 동안만 도달했다 — Swift 데몬은

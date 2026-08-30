@@ -17,8 +17,18 @@
 SimSPIClass SPI;
 
 bool SimEink::renderToPng(const char* scene, const char* path) {
-  if (!SimScenes::apply(scene)) return false;
+  const bool simulateDecision = std::strcmp(scene, "decision") == 0;
+  if (!SimScenes::apply(simulateDecision ? "permission" : scene)) return false;
   Eink::init();
+#if defined(BOARD_SIM_PULL)
+  if (simulateDecision) {
+    // Pixel-exact post-primary-action state: the real pull boards open an
+    // eight-minute interactive lease before DECISION becomes eligible.
+    interactiveLeaseUntilMs = g_sim_millis + FACE_HOLD_MS;
+    faceHoldUntilMs = 0;
+    suppressedDecisionHash = 0;
+  }
+#endif
   // render() is content-hash + min-refresh-interval gated. In an --all run these
   // statics persist across scenes with millis() otherwise frozen, so advance the
   // virtual clock past the coalesce window and render twice to force a fresh draw.

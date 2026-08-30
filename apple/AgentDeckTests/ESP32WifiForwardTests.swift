@@ -14,6 +14,17 @@ import XCTest
 /// See memory `esp32-wifi-flap-broadcast-amplification`.
 final class ESP32WifiForwardTests: XCTestCase {
 
+    func testWifiDeviceInfoKeepsEinkRefreshCounters() throws {
+        let info = try XCTUnwrap(ESP32Serial.wifiDeviceInfo([
+            "board": "inkdeck",
+            "version": "0.1.2",
+            "repaintCount": 2_757,
+            "fullRefreshCount": 461,
+        ]))
+        XCTAssertEqual(info.repaintCount, 2_757)
+        XCTAssertEqual(info.fullRefreshCount, 461)
+    }
+
     /// Dashboard-only events must be dropped (nil) for a display board.
     func testNonForwardedEventIsDroppedForEsp32() {
         let dashboardOnly: [[String: Any]] = [

@@ -151,12 +151,31 @@ async def write_packet(client, packet: bytes) -> None:
         await client.write_gatt_char(WRITE_CHAR, packet[i:i + CHUNK_SIZE], response=False)
 
 
-async def blank_panel(client) -> None:
-    """Push an all-black 11x11 farewell frame so the stateful LED panel doesn't
-    freeze on the last dashboard scene after we go away. The Timebox Mini has no
-    text resolution for an "OFFLINE" label (mirrors the Swift TimeboxModule, which
-    also blanks to 11x11 black; iDotMatrix/Pixoo can fit an OFFLINE glyph)."""
-    await write_packet(client, build_static_image_packet(bytes(182)))
+def make_offline_image() -> PilImage.Image:
+    """Native 11x11 passive-display OFFLINE badge, mirrored by MicroGlyphs."""
+    img = PilImage.new("RGB", (TIMEBOX_W, TIMEBOX_H), (2, 6, 10))
+    px = img.load()
+    for x, y in (
+        (0, 0), (1, 0), (0, 1), (9, 0), (10, 0), (10, 1),
+        (0, 9), (0, 10), (1, 10), (10, 9), (9, 10), (10, 10),
+    ):
+        px[x, y] = (0, 48, 56)
+    for x in range(2, 9):
+        px[x, 2] = (68, 88, 92)
+        px[x, 8] = (68, 88, 92)
+    for y in range(3, 8):
+        if y != 7:
+            px[2, y] = (68, 88, 92)
+        px[8, y] = (68, 88, 92)
+    for i in range(7):
+        px[2 + i, 8 - i] = (68, 88, 92)
+    return img
+
+
+async def offline_panel(client) -> None:
+    """Leave a sparse dark badge instead of a stale live dashboard frame."""
+    payload = encode_image_bright(make_offline_image(), 100, 1.0, 1.0, 1.0)
+    await write_packet(client, build_static_image_packet(payload))
 
 
 async def push_micro_frame(client, url, brightness, gamma, sat, contrast, last_key, force=False) -> tuple[str, bool]:
@@ -190,7 +209,7 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
     status = StatusReporter()
     stop = asyncio.Event()
     # Why we're stopping — decides the farewell. 'signal' = clean daemon shutdown
-    # (no successor → blank the panel). 'orphan' = parent died (a successor daemon
+    # (no successor → mark the panel OFFLINE). 'orphan' = parent died (a successor daemon
     # may have taken over → don't clobber its frame). 'bridge_gone' = nobody home.
     exit_reason = {"v": None}
 
@@ -352,31 +371,31 @@ async def run(address: str, url: str, brightness: int, gamma: float, sat: float,
                         pass
 
                 # Inner loop exited. If we're shutting down (SIGTERM, orphaned, or
-                # bridge gone) and the link is still up, blank the panel before the
+                # bridge gone) and the link is still up, mark the panel OFFLINE before the
                 # `async with` drops BLE — otherwise the stateful LED panel freezes
                 # on the last dashboard frame forever (parity with iDotMatrix's
-                # OFFLINE farewell and the Swift TimeboxModule's 11x11 black blank).
+                # OFFLINE farewell and the Swift TimeboxModule's matching 11x11 badge).
                 #
                 # EXCEPT when a successor daemon has already taken over: our parent
                 # died abruptly (orphan) but the bridge is answering again, so a new
                 # daemon restarted and is repainting the panel. Blanking here would
-                # clobber its fresh frame and the panel would sit blank until a
+                # clobber its fresh frame and the panel would sit offline until a
                 # power-cycle — the exact failure this guard prevents.
                 successor_took_over = exit_reason["v"] == "orphan" and bridge_reachable(url)
                 if successor_took_over:
-                    print("Successor daemon detected — skipping farewell blank (it will repaint).")
+                    print("Successor daemon detected — skipping farewell badge (it will repaint).")
                 if stop.is_set() and client.is_connected and not successor_took_over:
                     try:
-                        await blank_panel(client)
-                        # blank_panel writes WITHOUT response — the await returns once
+                        await offline_panel(client)
+                        # offline_panel writes WITHOUT response — the await returns once
                         # the packet is queued to the OS, not once it's transmitted.
                         # The `async with` below drops the BLE link immediately on
-                        # exit; without this beat the queued blank never goes over the
+                        # exit; without this beat the queued badge never goes over the
                         # air and the panel freezes on its last dashboard frame.
                         await asyncio.sleep(0.5)
-                        print("Shutting down — blanked Timebox panel.")
+                        print("Shutting down — Timebox panel marked OFFLINE.")
                     except Exception as e:
-                        print(f"Farewell blank failed: {e}", file=sys.stderr)
+                        print(f"Farewell OFFLINE badge failed: {e}", file=sys.stderr)
         except Exception as e:
             print(f"BLE connection error: {e}", file=sys.stderr)
             status.failed(f"BLE connection error: {e}")

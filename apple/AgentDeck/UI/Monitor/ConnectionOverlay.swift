@@ -147,7 +147,7 @@ struct ConnectionOverlay: View {
                     // Connection error from the last attempted URL.
                     if let error = stateHolder.connection.lastError,
                        stateHolder.connection.status == .disconnected {
-                        Text(error)
+                        Text("Connection error · \(error)")
                             .font(.caption)
                             .monospaced()
                             .foregroundStyle(.red)

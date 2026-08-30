@@ -1,11 +1,19 @@
 #include <cassert>
 
 #include "ui/eink/eink_dashboard_layout.h"
+#include "ui/eink/epd47_page_policy.h"
 
 using AgentDeckEink::LayoutInput;
 using AgentDeckEink::makeLayout;
 
 int main() {
+    using AgentDeckEpd47::Page;
+    assert(AgentDeckEpd47::automaticPage(0, 0) == Page::Limits);
+    assert(AgentDeckEpd47::automaticPage(0, 1) == Page::Focus);
+    assert(AgentDeckEpd47::automaticPage(1, 0) == Page::Focus);
+    assert(AgentDeckEpd47::automaticPage(1, 1) == Page::Queue);
+    assert(AgentDeckEpd47::automaticPage(0, 8) == Page::Queue);
+
     const auto inkdeck = makeLayout(LayoutInput{800, 480, 68, 0, 28, 21, 2, 1, 6, 2});
     assert(!inkdeck.portrait);
     assert(inkdeck.columns == 3);

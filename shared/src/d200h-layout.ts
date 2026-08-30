@@ -19,6 +19,7 @@ import {
   renderBackButton,
   renderNextPageButton,
   renderInfoSlot,
+  renderDisconnectedSlot,
   svgFrame,
   escSvgText,
 } from './svg-renderers/index.js';
@@ -66,6 +67,10 @@ const USAGE_PREFERRED_POS = ['0_2', '1_2', '2_2'];
 
 export interface DashState {
   state: string;
+  /** Explicit plugin↔daemon transport state. The daemon's aggregate
+   *  `state:'disconnected'` also means "connected, but no active session", so
+   *  it is not sufficient to select the OFFLINE surface. */
+  daemonConnected?: boolean;
   projectName: string;
   modelName: string;
   mode: string;
@@ -112,6 +117,7 @@ export interface DashState {
 export function parseState(evt: any): DashState {
   return {
     state: evt?.state ?? 'DISCONNECTED',
+    daemonConnected: typeof evt?.daemonConnected === 'boolean' ? evt.daemonConnected : undefined,
     projectName: evt?.projectName ?? '',
     modelName: evt?.modelName ?? '',
     mode: evt?.mode ?? 'default',
@@ -832,10 +838,10 @@ export function buildSessionDeck(stateEvt: any, view: DeckView, positions: strin
   const animated = view.animated ?? false;
   if (slots.length === 0) return out;
 
-  // Daemon down → OFFLINE hero on the center key, rest dim. Every key launches
-  // the companion app on press (parity with the SD/SD+ keypad). If AgentDeck
-  // isn't installed yet, the hero shows the install command so a marketplace-only
-  // user knows the daemon is the missing piece.
+  // Daemon down → one deck-spanning OFFLINE card. Every key launches the
+  // companion app on press (parity with the SD/SD+ keypad). The Ulanzi plugin
+  // supplies `daemonConnected`; the legacy state+empty fallback remains for
+  // direct callers and older previews.
   //
   // Gate on an EMPTY session list, not the top-level state alone: the daemon
   // reports `state:'disconnected'` whenever no managed/focused session is active
@@ -844,10 +850,24 @@ export function buildSessionDeck(stateEvt: any, view: DeckView, positions: strin
   // `sessions_list`, so showing OFFLINE while sessions are present would hide a
   // live deck. Genuine link-down funnels through the store as DISCONNECTED with
   // an empty list, so this still fires for a truly absent daemon.
-  if ((state.state === 'DISCONNECTED' || state.state === 'disconnected') && state.allSessions.length === 0) {
-    const hero = Math.floor(slots.length / 2);
-    slots.forEach((pos, i) => out.set(pos, {
-      svg: i === hero ? renderInfoSlot(PASSIVE_OFFLINE_LABEL, OPEN_AGENTDECK_LABEL, 'agentdeck', 'brand', 'npx @agentdeck/setup') : renderEmptySlot(),
+  const daemonOffline = state.daemonConnected === false
+    || (state.daemonConnected == null
+      && (state.state === 'DISCONNECTED' || state.state === 'disconnected')
+      && state.allSessions.length === 0);
+  if (daemonOffline) {
+    const coordinates = slots.map((pos) => {
+      const [col = 0, row = 0] = pos.split('_').map(Number);
+      return { pos, col, row };
+    });
+    const cols = Math.max(1, ...coordinates.map((p) => p.col + 1));
+    const rows = Math.max(1, ...coordinates.map((p) => p.row + 1));
+    coordinates.forEach(({ pos, col, row }) => out.set(pos, {
+      svg: renderDisconnectedSlot({
+        kind: 'open-app',
+        label: PASSIVE_OFFLINE_LABEL,
+        subtitle: OPEN_AGENTDECK_LABEL,
+        col, row, cols, rows,
+      }),
       action: { kind: 'launch' },
     }));
     return out;
@@ -895,8 +915,13 @@ function buildList(
   const freeSlots = slots.filter((pos) => !usageHere.has(pos));
 
   if (sessions.length === 0) {
+    const ready = [
+      renderInfoSlot('HUB READY', 'connected', 'hub', 'ready'),
+      renderInfoSlot('NO SESSION', 'waiting', 'no-session', 'idle'),
+      renderInfoSlot('AgentDeck', 'idle', 'agentdeck', 'agent'),
+    ];
     freeSlots.forEach((pos, i) => out.set(pos, {
-      svg: i === 0 ? renderInfoSlot('NO SESSION', 'waiting', 'activity', 'info') : renderEmptySlot(),
+      svg: ready[i] ?? renderEmptySlot(),
       action: null,
     }));
     for (const [pos, cell] of usageHere) out.set(pos, cell);

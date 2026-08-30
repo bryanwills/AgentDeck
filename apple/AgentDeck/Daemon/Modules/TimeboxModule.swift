@@ -118,19 +118,21 @@ actor TimeboxModule: DeviceModule {
         renderTask?.cancel(); await renderTask?.value; renderTask = nil
         settingsReloadTask?.cancel(); await settingsReloadTask?.value; settingsReloadTask = nil
 
-        // Graceful teardown: blank the panel (11×11 black) then drop the BLE link.
-        await blankPanelIfConnected()
+        // Graceful teardown: leave a sparse dark OFFLINE badge, then drop BLE.
+        await offlinePanelIfConnected()
         await ble?.disconnect()
         connected = false
         refreshShadow()
     }
 
-    /// Write an all-black 11×11 frame so the panel does not keep displaying the last
-    /// session state after we stop driving it. No-op when the link is already down.
-    private func blankPanelIfConnected() async {
+    /// Leave the panel on the compact passive-display OFFLINE badge so a stopped
+    /// daemon cannot be mistaken for a live empty roster. No-op if BLE is down.
+    private func offlinePanelIfConnected() async {
         guard connected, let ble else { return }
         let n = TimeboxDivoomPacket.width
-        try? await ble.uploadFrame(rgb11x11: [UInt8](repeating: 0, count: n * n * 3))
+        var rgb = [UInt8](repeating: 0, count: n * n * 3)
+        MicroGlyphs.paintOffline(&rgb)
+        try? await ble.uploadFrame(rgb11x11: rgb)
         // Writes are write-without-response, so there is no ACK to wait on. Give the
         // frame time to reach the panel before the caller drops the GATT link —
         // disconnecting immediately can cut it off and leave the old frame displayed.
@@ -176,9 +178,9 @@ actor TimeboxModule: DeviceModule {
             // Timebox is a stateful-push panel: it holds whatever frame was written
             // last. Dropping the link without a farewell leaves the previous session's
             // creature frozen on a device we no longer drive, which reads as "still
-            // connected". stop() already blanks for the same reason — unpairing (and
+            // connected". stop() already leaves OFFLINE for the same reason — unpairing (and
             // swapping devices) has to as well.
-            await blankPanelIfConnected()
+            await offlinePanelIfConnected()
             await ble?.disconnect()
             connected = false
             consecutiveFailures = 0

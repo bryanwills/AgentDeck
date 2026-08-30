@@ -6,9 +6,8 @@
 #   ./render.sh box_86          # one board, all scenes
 #   ./render.sh box_86 working  # one board, one scene
 #
-# Boards mirror esp32/sim/platformio.ini envs: box_86 (480x480), ips35 (480x320),
-# amoled (360x360 round). Add more by copying an env block with the target board's
-# BOARD_*/SCREEN_* defines.
+# Boards mirror esp32/sim/platformio.ini envs. Add more by copying an env block
+# with the target board's BOARD_*/SCREEN_* defines.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -19,7 +18,7 @@ command -v "$PIO" >/dev/null 2>&1 || PIO="$HOME/.platformio/penv/bin/pio"
 # AgentDeck e-ink tree at the community fork's panel sizes (a layout diagnostic
 # for the shared geometry SSOT), and their output is not that fork's firmware
 # output. Ask for them by name.
-BOARDS_DEFAULT="box_86 ips35 amoled ttgo ips10 t_embed t_display_pro led8x32 inkdeck"
+BOARDS_DEFAULT="box_86 ips35 amoled ttgo ips10 t_embed t_display_pro led8x32 inkdeck nm_epd_420_preview lilygo_epd47_preview"
 BOARD="${1:-}"
 SCENE="${2:-}"
 OUTDIR="${OUTDIR:-sim-out}"
