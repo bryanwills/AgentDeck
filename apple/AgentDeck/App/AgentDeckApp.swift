@@ -85,11 +85,14 @@ struct AgentDeckApp: App {
         .defaultPosition(.center)
         .defaultSize(width: 1100, height: 760)
 
-        // QR pairing window — shows the daemon's ws:// URL as a QR code for
-        // iPad/iPhone pairing. Covers the case where mDNS fails (Local
-        // Network permission denied, different subnets, etc.).
-        Window("Pair iPad or iPhone", id: "pairing-qr") {
-            QRPairingWindow()
+        // Device pairing window — a QR of the daemon's ws:// URL for devices
+        // with a camera, and a six-digit pairing code for devices without one
+        // (e-ink readers). Covers the case where mDNS fails (Local Network
+        // permission denied, different subnets, etc.).
+        // id stays "pairing-qr": openWindow() call sites and
+        // DockVisibilityController.trackedWindowIDs key off it.
+        Window("Pair a Device", id: "pairing-qr") {
+            DevicePairingWindow()
                 .environmentObject(daemonService)
                 .environmentObject(preferences)
         }

@@ -792,7 +792,7 @@ struct ControlTowerPanel: View {
                 DockVisibilityController.shared.prepareToShowWindow()
                 openWindow(id: "pairing-qr")
             } label: {
-                Label("Pair iPad", systemImage: "qrcode")
+                Label("Pair Device", systemImage: "qrcode")
                     .font(.system(size: 10.5, weight: .medium))
             }
             .buttonStyle(.plain)
@@ -1391,7 +1391,7 @@ struct ControlTowerPanel: View {
     private var devicesPillMenu: some View {
         Menu {
             Button("Preview Devices", action: openDevicePreview)
-            Button("Pair iPad") {
+            Button("Pair Device") {
                 DockVisibilityController.shared.prepareToShowWindow()
                 openWindow(id: "pairing-qr")
             }
