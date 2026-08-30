@@ -229,6 +229,33 @@ enum PairingCodeRules {
               let value = Int(text), value >= 1, value <= 65535 else { return nil }
         return value
     }
+
+    /// Handshake header a client uses to say WHICH device it is. Approval needs
+    /// an identity, and the source address stops being one behind NAT, where
+    /// every device shares it. Not proof: the link is plaintext, so anything in
+    /// the handshake is replayable by a passive observer — as true of the
+    /// existing token. The win is granularity and revocation, not secrecy.
+    static let DEVICE_ID_HEADER = "${rules.deviceIdHeader}"
+
+    /// Characters in a device id — 128 bits, same shape as the auth token.
+    static let DEVICE_ID_LENGTH = ${rules.deviceIdLength}
+
+    /// Strict on purpose: this string is a map key and an approved row, so a
+    /// client must not be able to vary its own identity between connects and
+    /// appear as several devices — or outlive a revocation that way.
+    static func normalizeDeviceId(_ input: String?) -> String? {
+        guard let trimmed = input?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              trimmed.count == DEVICE_ID_LENGTH,
+              trimmed.allSatisfy({ $0.isHexDigit && ($0.isNumber || $0.isLowercase) })
+        else { return nil }
+        return trimmed
+    }
+
+    /// Short form for a row the operator reads — never used as a key.
+    static func shortDeviceId(_ id: String) -> String {
+        guard let normalized = normalizeDeviceId(id) else { return id }
+        return String(normalized.prefix(8))
+    }
 }
 `;
 }
@@ -343,6 +370,32 @@ object PairingCodeRules {
         val value = text.toIntOrNull() ?: return null
         return if (value in 1..65535) value else null
     }
+
+    /**
+     * Handshake header a client uses to say WHICH device it is. Approval needs
+     * an identity, and the source address stops being one behind NAT, where
+     * every device shares it. Not proof: the link is plaintext, so anything in
+     * the handshake is replayable by a passive observer — as true of the
+     * existing token. The win is granularity and revocation, not secrecy.
+     */
+    const val DEVICE_ID_HEADER = "${rules.deviceIdHeader}"
+
+    /** Characters in a device id — 128 bits, same shape as the auth token. */
+    const val DEVICE_ID_LENGTH = ${rules.deviceIdLength}
+
+    /**
+     * Strict on purpose: this string is a map key and an approved row, so a
+     * client must not be able to vary its own identity between connects and
+     * appear as several devices — or outlive a revocation that way.
+     */
+    fun normalizeDeviceId(input: String?): String? {
+        val trimmed = input?.trim()?.lowercase() ?: return null
+        if (trimmed.length != DEVICE_ID_LENGTH) return null
+        return if (trimmed.all { it in '0'..'9' || it in 'a'..'f' }) trimmed else null
+    }
+
+    /** Short form for a row the operator reads — never used as a key. */
+    fun shortDeviceId(id: String): String = normalizeDeviceId(id)?.take(8) ?: id
 }
 `;
 }
@@ -359,6 +412,8 @@ export function rulesFrom(mod) {
     maxFailedAttempts: mod.PAIRING_MAX_FAILED_ATTEMPTS,
     defaultRedemptions: mod.DEFAULT_PAIRING_REDEMPTIONS,
     defaultDaemonPort: mod.DEFAULT_DAEMON_PORT,
+    deviceIdHeader: mod.DEVICE_ID_HEADER,
+    deviceIdLength: mod.DEVICE_ID_LENGTH,
   };
 }
 

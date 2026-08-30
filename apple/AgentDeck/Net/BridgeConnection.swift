@@ -168,7 +168,13 @@ final class BridgeConnection: ObservableObject, @unchecked Sendable {
         #endif
         let session = URLSession(configuration: config)
         self.urlSession = session
-        let task = session.webSocketTask(with: wsUrl)
+        // A URLRequest rather than the bare URL so the handshake can carry this
+        // install's id: the daemon decides whether to accept us before any frame
+        // is sent, so an identity that arrives later cannot reach that decision.
+        // See DeviceIdentity.
+        var request = URLRequest(url: wsUrl)
+        request.setValue(DeviceIdentity.current, forHTTPHeaderField: PairingCodeRules.DEVICE_ID_HEADER)
+        let task = session.webSocketTask(with: request)
 
         // Half-open detection: idle timeout
         task.maximumMessageSize = 1_048_576  // 1MB

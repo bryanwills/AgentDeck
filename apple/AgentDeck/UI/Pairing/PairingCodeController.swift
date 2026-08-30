@@ -23,18 +23,49 @@ import Foundation
 final class PairingCodeController: ObservableObject {
 
     struct Knock: Identifiable, Equatable {
-        var id: String { ip }
+        var id: String { key }
+        let key: String
         let ip: String
+        let deviceId: String?
         let attempts: Int
         let staleToken: Bool
+
+        /// What the approval will actually be recorded against. An operator
+        /// approving a row deserves to know whether the grant follows the
+        /// device or merely its current address — behind NAT those are very
+        /// different promises.
+        var scope: String {
+            deviceId.map { "device \(PairingCodeRules.shortDeviceId($0))" } ?? "address only"
+        }
 
         /// A device that presented a token we no longer accept is a different
         /// story from one that presented nothing, and the operator's next move
         /// differs — so never collapse the two into "unknown device".
         var detail: String {
             let tries = attempts == 1 ? "1 attempt" : "\(attempts) attempts"
-            return staleToken ? "\(tries) · stale credential" : tries
+            let base = "\(tries) · \(scope)"
+            return staleToken ? "\(base) · stale credential" : base
         }
+    }
+
+    struct ApprovedPeer: Identifiable, Equatable {
+        var id: String { key }
+        let key: String
+        let deviceId: String?
+        let lastIP: String
+
+        var label: String {
+            if let deviceId {
+                let suffix = lastIP.isEmpty ? "" : " · \(lastIP)"
+                return "device \(PairingCodeRules.shortDeviceId(deviceId))\(suffix)"
+            }
+            return lastIP.isEmpty ? key : lastIP
+        }
+
+        /// An address-scoped grant is the legacy shape and carries the caveats a
+        /// device-scoped one escapes; the row says which it is rather than
+        /// letting the two read alike.
+        var isAddressScoped: Bool { deviceId == nil }
     }
 
     struct Redemption: Identifiable, Equatable {
@@ -62,7 +93,7 @@ final class PairingCodeController: ObservableObject {
     /// an address they can see. See PairingKnockStore for why the identity is
     /// an IP and what that costs (a DHCP lease change retires an approval).
     @Published private(set) var knocks: [Knock] = []
-    @Published private(set) var approvedPeers: [String] = []
+    @Published private(set) var approvedPeers: [ApprovedPeer] = []
     @Published private(set) var error: String?
 
     /// Resolved per call rather than stored: the daemon can move ports under
@@ -132,34 +163,43 @@ final class PairingCodeController: ObservableObject {
     private func refreshKnocks() async {
         guard let json = try? await get("/pair/knocks") else { return }
         knocks = (json["knocks"] as? [[String: Any]] ?? []).map {
-            Knock(
+            let rawId = $0["deviceId"] as? String ?? ""
+            return Knock(
+                key: $0["key"] as? String ?? "",
                 ip: $0["ip"] as? String ?? "",
+                deviceId: rawId.isEmpty ? nil : rawId,
                 attempts: ($0["attempts"] as? NSNumber)?.intValue ?? 0,
                 staleToken: $0["staleToken"] as? Bool ?? false
             )
-        }.filter { !$0.ip.isEmpty }
-        approvedPeers = (json["approved"] as? [[String: Any]] ?? [])
-            .compactMap { $0["ip"] as? String }
+        }.filter { !$0.key.isEmpty }
+        approvedPeers = (json["approved"] as? [[String: Any]] ?? []).map {
+            let rawId = $0["deviceId"] as? String ?? ""
+            return ApprovedPeer(
+                key: $0["key"] as? String ?? "",
+                deviceId: rawId.isEmpty ? nil : rawId,
+                lastIP: $0["lastIP"] as? String ?? ""
+            )
+        }.filter { !$0.key.isEmpty }
     }
 
-    func approve(_ ip: String) async {
+    func approve(_ key: String) async {
         busy = true
         defer { busy = false }
-        _ = try? await post("/pair/approve", body: ["ip": ip])
+        _ = try? await post("/pair/approve", body: ["key": key])
         await refreshKnocks()
     }
 
-    func dismiss(_ ip: String) async {
+    func dismiss(_ key: String) async {
         busy = true
         defer { busy = false }
-        _ = try? await post("/pair/dismiss", body: ["ip": ip])
+        _ = try? await post("/pair/dismiss", body: ["key": key])
         await refreshKnocks()
     }
 
-    func revoke(_ ip: String) async {
+    func revoke(_ key: String) async {
         busy = true
         defer { busy = false }
-        _ = try? await post("/pair/revoke", body: ["ip": ip])
+        _ = try? await post("/pair/revoke", body: ["key": key])
         await refreshKnocks()
     }
 

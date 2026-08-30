@@ -2788,7 +2788,9 @@ final class DaemonServer {
             // Folded in here rather than as a third parameter so
             // httpAccessResponse stays the pure truth table its test drives —
             // "authenticated" is one input, however the peer earned it.
-            let authenticated = tokenValid || PairingKnockStore.shared.isApproved(request.remoteIP)
+            let authenticated = tokenValid || PairingKnockStore.shared.isApproved(
+                ip: request.remoteIP,
+                deviceId: request.headers[PairingCodeRules.DEVICE_ID_HEADER])
             return Self.httpAccessResponse(
                 method: request.method, path: request.path,
                 isLocal: isLocal, tokenValid: authenticated, daemonPort: daemonPort,
@@ -2855,7 +2857,9 @@ final class DaemonServer {
             return .json([
                 "knocks": knocks.map {
                     [
+                        "key": $0.key,
                         "ip": $0.ip,
+                        "deviceId": $0.deviceId ?? "",
                         "attempts": $0.attempts,
                         "firstSeen": Int($0.firstSeen.timeIntervalSince1970 * 1000),
                         "lastSeen": Int($0.lastSeen.timeIntervalSince1970 * 1000),
@@ -2863,38 +2867,43 @@ final class DaemonServer {
                     ]
                 },
                 "approved": approvals.map {
-                    ["ip": $0.ip, "approvedAt": Int($0.approvedAt.timeIntervalSince1970 * 1000)]
+                    [
+                        "key": $0.key,
+                        "deviceId": $0.deviceId ?? "",
+                        "lastIP": $0.lastIP,
+                        "approvedAt": Int($0.approvedAt.timeIntervalSince1970 * 1000),
+                    ]
                 },
             ])
         }
 
         await httpServer.post("/pair/approve") { request in
-            guard let ip = Self.jsonBody(request.body)["ip"] as? String, !ip.isEmpty else {
-                return .json(["error": "ip required"], status: 400)
+            guard let key = Self.jsonBody(request.body)["key"] as? String, !key.isEmpty else {
+                return .json(["error": "key required"], status: 400)
             }
-            PairingKnockStore.shared.approve(ip: ip)
-            DaemonLogger.shared.info("WS: operator approved \(ip)")
-            return .json(["approved": ip])
+            PairingKnockStore.shared.approve(key: key)
+            DaemonLogger.shared.info("WS: operator approved \(key)")
+            return .json(["approved": key])
         }
 
         await httpServer.post("/pair/revoke") { request in
-            guard let ip = Self.jsonBody(request.body)["ip"] as? String, !ip.isEmpty else {
-                return .json(["error": "ip required"], status: 400)
+            guard let key = Self.jsonBody(request.body)["key"] as? String, !key.isEmpty else {
+                return .json(["error": "key required"], status: 400)
             }
-            PairingKnockStore.shared.revoke(ip: ip)
-            DaemonLogger.shared.info("WS: operator revoked \(ip)")
-            return .json(["revoked": ip])
+            PairingKnockStore.shared.revoke(key: key)
+            DaemonLogger.shared.info("WS: operator revoked \(key)")
+            return .json(["revoked": key])
         }
 
         // Dismiss is not a denylist — see PairingKnockStore.dismiss for why an
         // IP-keyed block would be theatre. It clears the row; the peer may knock
         // again and reappear.
         await httpServer.post("/pair/dismiss") { request in
-            guard let ip = Self.jsonBody(request.body)["ip"] as? String, !ip.isEmpty else {
-                return .json(["error": "ip required"], status: 400)
+            guard let key = Self.jsonBody(request.body)["key"] as? String, !key.isEmpty else {
+                return .json(["error": "key required"], status: 400)
             }
-            PairingKnockStore.shared.dismiss(ip: ip)
-            return .json(["dismissed": ip])
+            PairingKnockStore.shared.dismiss(key: key)
+            return .json(["dismissed": key])
         }
 
         await httpServer.get("/health") { [weak self] _ in

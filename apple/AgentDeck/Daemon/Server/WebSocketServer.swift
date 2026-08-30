@@ -317,12 +317,16 @@ actor WebSocketServer {
             // PairingKnockStore for why the IP is the identity here: this
             // decision happens at the handshake, and `client_register` (where a
             // device says what it is) cannot arrive until after a socket exists.
-            let approvedPeer = PairingKnockStore.shared.isApproved(remoteIP)
+            // Sent by clients that know how to identify themselves; absent from
+            // every device that predates the header, which then falls back to
+            // being approved by address.
+            let deviceId = parsed.headers[PairingCodeRules.DEVICE_ID_HEADER]
+            let approvedPeer = PairingKnockStore.shared.isApproved(ip: remoteIP, deviceId: deviceId)
             guard approvedPeer || AuthManager.shared.validateToken(token) else {
                 // Record before refusing: the refusal is the only moment the
                 // daemon learns this device wants in, and until it was surfaced
                 // a device with no credential retried forever into a log.
-                PairingKnockStore.shared.record(ip: remoteIP, staleToken: !token.isEmpty)
+                PairingKnockStore.shared.record(ip: remoteIP, deviceId: deviceId, staleToken: !token.isEmpty)
                 // The two cases read very differently to an operator: a peer
                 // that presented nothing is usually an unpaired client, while a
                 // peer presenting a token we do not accept is a provisioned

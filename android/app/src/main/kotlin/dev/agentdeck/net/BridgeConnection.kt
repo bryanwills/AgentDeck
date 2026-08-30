@@ -231,6 +231,13 @@ class BridgeConnection private constructor() {
 
         val request = Request.Builder()
             .url(wsUrl)
+            .apply {
+                // Lets the daemon approve THIS device rather than its address —
+                // see DeviceIdentity. Omitted when there is no id to send, which
+                // leaves the daemon on its address-scoped fallback rather than
+                // sending it a value that changes every connect.
+                DeviceIdentity.current?.let { addHeader(PairingCodeRules.DEVICE_ID_HEADER, it) }
+            }
             .build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {

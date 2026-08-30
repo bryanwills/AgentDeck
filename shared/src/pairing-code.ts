@@ -122,6 +122,54 @@ export function isPairingCode(code: unknown): boolean {
  * one, and on that path nobody is around to notice a port typo — so the default
  * has to be the port the daemon actually wants, not a guess.
  */
+/**
+ * Handshake header a client uses to say WHICH device it is.
+ *
+ * Approval needs an identity, and until now the only one available was the
+ * source address: the decision happens at the WebSocket upgrade, before any
+ * frame, so `client_register` — where a device says its name — has not arrived
+ * yet. On a LAN an address is a weak but non-trivial identity. Behind NAT it
+ * stops being an identity at all: every device shares one source address, so
+ * approving one approves all of them. That is the failure this closes.
+ *
+ * A header rather than a query parameter so it stays out of URLs, which get
+ * logged, copied into bug reports, and pasted into chat.
+ *
+ * What this is NOT: proof. The link is plaintext `ws://`, so anything in the
+ * handshake is replayable by a passive observer on the same segment — exactly
+ * as true of the existing `?token=`, which every paired device already carries
+ * that way. So this is no weaker than what ships today, and it buys the two
+ * things an address cannot: devices behind one NAT are told apart, and one
+ * device can be revoked without rotating the token the whole fleet shares.
+ * Making it unforgeable needs a challenge-response over a channel that is not
+ * plaintext; that is a separate piece of work and this does not pretend to it.
+ */
+export const DEVICE_ID_HEADER = 'x-agentdeck-device';
+
+/** Characters in a device id — 128 bits, the same shape as the auth token. */
+export const DEVICE_ID_LENGTH = 32;
+
+/**
+ * Reduce a client-supplied device id to its canonical form, or null.
+ *
+ * Strict because this string is a map key on the daemon and a row the operator
+ * approves: accepting a loose one would let a client vary its own identity
+ * between connects (case, padding) and appear as several devices, which is
+ * noise in the approval list and a way to outlive a revocation.
+ */
+export function normalizeDeviceId(input: unknown): string | null {
+  if (typeof input !== 'string') return null;
+  const trimmed = input.trim().toLowerCase();
+  if (trimmed.length !== DEVICE_ID_LENGTH) return null;
+  return /^[0-9a-f]+$/.test(trimmed) ? trimmed : null;
+}
+
+/** Short form for a row the operator reads — never used as a key. */
+export function shortDeviceId(id: string): string {
+  const normalized = normalizeDeviceId(id);
+  return normalized ? normalized.slice(0, 8) : id;
+}
+
 export const DEFAULT_DAEMON_PORT = 9120;
 
 export interface DaemonAddress {

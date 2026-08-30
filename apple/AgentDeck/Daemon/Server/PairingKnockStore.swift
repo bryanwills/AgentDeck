@@ -19,15 +19,31 @@
 //
 // Three properties this file has to keep.
 //
-// **Identity is the IP, and that is a real limitation, not a shortcut.** The
-// refusal happens at the HTTP upgrade, before any frame — `client_register`,
-// which is where a device says its name, arrives only after a socket exists. So
-// at decision time the IP is the only fact there is. Consequence: a DHCP lease
-// change retires an approval, and the device knocks again. Say that in the UI
-// rather than implying the approval follows the device.
+// **Identity is the device id when the client sends one, and the address only
+// when it does not.** The refusal happens at the HTTP upgrade, before any frame
+// — `client_register`, where a device says its name, arrives only after a socket
+// exists — so the daemon must learn who this is from the handshake itself. A
+// client that sends `x-agentdeck-device` is approved as that device: two
+// devices behind one NAT are told apart, a DHCP lease change does not retire
+// the grant, and one device can be revoked without touching the token the whole
+// fleet shares.
+//
+// The address remains the key for clients that send no id, and that path must
+// keep working: every device already in the field predates the header, and
+// refusing them would turn an upgrade into a fleet-wide outage. An IP-keyed
+// approval carries the old caveats — it retires when the lease changes, and
+// behind NAT it is not an identity at all — so the UI labels which kind a row
+// is instead of letting them read alike.
+//
+// Neither kind is proof. The link is plaintext `ws://`, so a device id in the
+// handshake is replayable by a passive observer on the same segment — exactly
+// as true of the `?token=` every paired device already carries. This is no
+// weaker than what ships today; it buys granularity and revocation, not
+// secrecy. Unforgeable identity needs a challenge-response over a channel that
+// is not plaintext, which is separate work this does not pretend to.
 //
 // **A claimed name is never identity.** Nothing here reads one. If a name is
-// ever surfaced it must sit beside the IP, never instead of it.
+// ever surfaced it must sit beside the address, never instead of it.
 //
 // **Bounded, and expired on read.** A hostile peer must not be able to grow this
 // list without limit, so it is capped and the oldest knock is dropped — which
@@ -57,7 +73,12 @@ final class PairingKnockStore: @unchecked Sendable {
     static let maxKnocks = 12
 
     struct Knock: Sendable, Equatable {
+        /// What an approval will be recorded against. `device:<id>` when the
+        /// client identified itself, `ip:<addr>` otherwise — never the bare
+        /// string, so the two can never collide or be confused downstream.
+        let key: String
         let ip: String
+        let deviceId: String?
         var attempts: Int
         var firstSeen: Date
         var lastSeen: Date
@@ -65,11 +86,30 @@ final class PairingKnockStore: @unchecked Sendable {
         /// token at all. Reads very differently to an operator: usually a
         /// provisioned device whose credential went stale, not a new device.
         var staleToken: Bool
+
+        var isDeviceScoped: Bool { deviceId != nil }
     }
 
     struct Approval: Sendable, Equatable, Codable {
-        let ip: String
+        let key: String
+        /// Where it last connected from. Display only — an approval keyed on a
+        /// device id must not start depending on the address, or it would
+        /// silently reacquire the NAT and DHCP problems it exists to escape.
+        let lastIP: String
         let approvedAt: Date
+
+        var deviceId: String? {
+            key.hasPrefix("device:") ? String(key.dropFirst("device:".count)) : nil
+        }
+    }
+
+    /// The one place a key is spelled, so the gate, the store and the UI cannot
+    /// disagree about what "this peer" means.
+    static func peerKey(ip: String, deviceId: String?) -> String {
+        if let deviceId, let normalized = PairingCodeRules.normalizeDeviceId(deviceId) {
+            return "device:\(normalized)"
+        }
+        return "ip:\(ip)"
     }
 
     private let lock = NSLock()
@@ -84,19 +124,22 @@ final class PairingKnockStore: @unchecked Sendable {
 
     /// Called from the refusal path. Cheap on purpose — it runs for every
     /// rejected handshake, and a looping device produces one every few seconds.
-    func record(ip: String, staleToken: Bool, now: Date = Date()) {
+    func record(ip: String, deviceId: String?, staleToken: Bool, now: Date = Date()) {
         guard !ip.isEmpty else { return }
+        let normalizedId = PairingCodeRules.normalizeDeviceId(deviceId)
+        let key = Self.peerKey(ip: ip, deviceId: normalizedId)
         lock.lock()
         defer { lock.unlock() }
-        if approved[ip] != nil { return }   // already let in; not a knock
-        if var existing = pending[ip] {
+        if approved[key] != nil { return }   // already let in; not a knock
+        if var existing = pending[key] {
             existing.attempts += 1
             existing.lastSeen = now
             existing.staleToken = staleToken
-            pending[ip] = existing
+            pending[key] = existing
         } else {
-            pending[ip] = Knock(ip: ip, attempts: 1, firstSeen: now,
-                                lastSeen: now, staleToken: staleToken)
+            pending[key] = Knock(key: key, ip: ip, deviceId: normalizedId,
+                                 attempts: 1, firstSeen: now,
+                                 lastSeen: now, staleToken: staleToken)
             evictIfNeeded()
         }
     }
@@ -113,17 +156,17 @@ final class PairingKnockStore: @unchecked Sendable {
     /// which is deliberate — a permanent denylist keyed on an IP a stranger can
     /// change is security theatre, and it would silently strand a real device
     /// that later inherits that address.
-    func dismiss(ip: String) {
+    func dismiss(key: String) {
         lock.lock()
         defer { lock.unlock() }
-        pending.removeValue(forKey: ip)
+        pending.removeValue(forKey: key)
     }
 
     private func evictIfNeeded() {
         guard pending.count > Self.maxKnocks else { return }
         let ordered = pending.values.sorted { $0.lastSeen < $1.lastSeen }
         for knock in ordered.prefix(pending.count - Self.maxKnocks) {
-            pending.removeValue(forKey: knock.ip)
+            pending.removeValue(forKey: knock.key)
         }
     }
 
@@ -131,30 +174,41 @@ final class PairingKnockStore: @unchecked Sendable {
 
     /// Approving is what a pairing code would have done, minus the typing: from
     /// here on this peer authenticates by address. Persisted immediately.
-    func approve(ip: String, now: Date = Date()) {
-        guard !ip.isEmpty else { return }
+    func approve(key: String, now: Date = Date()) {
+        guard !key.isEmpty else { return }
         lock.lock()
-        approved[ip] = Approval(ip: ip, approvedAt: now)
-        pending.removeValue(forKey: ip)
+        let lastIP = pending[key]?.ip ?? approved[key]?.lastIP ?? ""
+        approved[key] = Approval(key: key, lastIP: lastIP, approvedAt: now)
+        pending.removeValue(forKey: key)
         let snapshot = approved
         lock.unlock()
         Self.persist(snapshot)
     }
 
-    func revoke(ip: String) {
+    func revoke(key: String) {
         lock.lock()
-        approved.removeValue(forKey: ip)
+        approved.removeValue(forKey: key)
         let snapshot = approved
         lock.unlock()
         Self.persist(snapshot)
     }
 
     /// The question the WebSocket gate asks. Must stay allocation-light.
-    func isApproved(_ ip: String) -> Bool {
-        guard !ip.isEmpty else { return false }
+    ///
+    /// A device id wins when the client sent one; the address is consulted only
+    /// as the legacy path, so a client that adopts the header stops depending on
+    /// its address the moment it does. Both are checked rather than one, because
+    /// a device approved by address before it learned to send an id must not be
+    /// locked out by the upgrade that taught it.
+    func isApproved(ip: String, deviceId: String?) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return approved[ip] != nil
+        if let normalized = PairingCodeRules.normalizeDeviceId(deviceId),
+           approved["device:\(normalized)"] != nil {
+            return true
+        }
+        guard !ip.isEmpty else { return false }
+        return approved["ip:\(ip)"] != nil
     }
 
     func approvals() -> [Approval] {
@@ -165,10 +219,32 @@ final class PairingKnockStore: @unchecked Sendable {
 
     // MARK: - Persistence
 
+    /// One shape written before approvals were keyed on a device: a bare
+    /// address and a timestamp.
+    private struct LegacyApproval: Codable {
+        let ip: String
+        let approvedAt: Date
+    }
+
     private static func loadApprovals() -> [String: Approval] {
-        guard let data = try? Data(contentsOf: AgentDeckPaths.pairingApproved),
-              let rows = try? JSONDecoder().decode([Approval].self, from: data) else { return [:] }
-        return Dictionary(uniqueKeysWithValues: rows.map { ($0.ip, $0) })
+        guard let data = try? Data(contentsOf: AgentDeckPaths.pairingApproved) else { return [:] }
+        let decoder = JSONDecoder()
+        if let rows = try? decoder.decode([Approval].self, from: data) {
+            return Dictionary(rows.map { ($0.key, $0) }, uniquingKeysWith: { _, newer in newer })
+        }
+        // Migrate rather than discard. A decode that merely fails reads as
+        // "nobody is approved", which silently un-pairs every device the
+        // operator already let in — the same failure the tmp+rename below
+        // exists to prevent, arriving through the schema instead of the disk.
+        if let legacy = try? decoder.decode([LegacyApproval].self, from: data) {
+            let migrated = legacy.map {
+                Approval(key: "ip:\($0.ip)", lastIP: $0.ip, approvedAt: $0.approvedAt)
+            }
+            let table = Dictionary(migrated.map { ($0.key, $0) }, uniquingKeysWith: { _, newer in newer })
+            persist(table)
+            return table
+        }
+        return [:]
     }
 
     private static func persist(_ approved: [String: Approval]) {

@@ -121,11 +121,11 @@ struct DevicePairingWindow: View {
                                 .foregroundStyle(TerrariumHUD.subtext)
                         }
                         Spacer()
-                        Button("Approve") { Task { await pairing.approve(knock.ip) } }
+                        Button("Approve") { Task { await pairing.approve(knock.key) } }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
                             .disabled(pairing.busy)
-                        Button("Dismiss") { Task { await pairing.dismiss(knock.ip) } }
+                        Button("Dismiss") { Task { await pairing.dismiss(knock.key) } }
                             .buttonStyle(.borderless)
                             .controlSize(.small)
                             .tint(TerrariumHUD.subtext)
@@ -143,17 +143,17 @@ struct DevicePairingWindow: View {
                         // An approval keys on the address, so a DHCP lease change
                         // retires it and the device knocks again. Say so here
                         // rather than letting the row imply it follows the device.
-                        Text("These addresses connect without a token. A new DHCP address means approving again.")
+                        Text("These connect without a token. A device-scoped grant follows the device; an address-scoped one retires when its DHCP address changes.")
                             .font(HUDFont.monoSmall)
                             .foregroundStyle(TerrariumHUD.subtext)
                             .fixedSize(horizontal: false, vertical: true)
-                        ForEach(pairing.approvedPeers, id: \.self) { ip in
+                        ForEach(pairing.approvedPeers) { peer in
                             HStack {
-                                Text(ip)
+                                Text(peer.label)
                                     .font(HUDFont.monoSmall)
-                                    .foregroundStyle(TerrariumHUD.subtext)
+                                    .foregroundStyle(peer.isAddressScoped ? TerrariumHUD.ledAmber : TerrariumHUD.subtext)
                                 Spacer()
-                                Button("Revoke") { Task { await pairing.revoke(ip) } }
+                                Button("Revoke") { Task { await pairing.revoke(peer.key) } }
                                     .buttonStyle(.borderless)
                                     .controlSize(.small)
                                     .tint(TerrariumHUD.ledAmber)

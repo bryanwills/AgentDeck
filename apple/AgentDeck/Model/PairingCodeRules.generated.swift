@@ -192,4 +192,31 @@ enum PairingCodeRules {
               let value = Int(text), value >= 1, value <= 65535 else { return nil }
         return value
     }
+
+    /// Handshake header a client uses to say WHICH device it is. Approval needs
+    /// an identity, and the source address stops being one behind NAT, where
+    /// every device shares it. Not proof: the link is plaintext, so anything in
+    /// the handshake is replayable by a passive observer — as true of the
+    /// existing token. The win is granularity and revocation, not secrecy.
+    static let DEVICE_ID_HEADER = "x-agentdeck-device"
+
+    /// Characters in a device id — 128 bits, same shape as the auth token.
+    static let DEVICE_ID_LENGTH = 32
+
+    /// Strict on purpose: this string is a map key and an approved row, so a
+    /// client must not be able to vary its own identity between connects and
+    /// appear as several devices — or outlive a revocation that way.
+    static func normalizeDeviceId(_ input: String?) -> String? {
+        guard let trimmed = input?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              trimmed.count == DEVICE_ID_LENGTH,
+              trimmed.allSatisfy({ $0.isHexDigit && ($0.isNumber || $0.isLowercase) })
+        else { return nil }
+        return trimmed
+    }
+
+    /// Short form for a row the operator reads — never used as a key.
+    static func shortDeviceId(_ id: String) -> String {
+        guard let normalized = normalizeDeviceId(id) else { return id }
+        return String(normalized.prefix(8))
+    }
 }
