@@ -3,7 +3,10 @@
 // RockBase NM-EPD-420 — ESP32-S3 N16R8 + 4.2" 400x300 tri-color panel.
 // Pin map is from the board schematic and the manufacturer's reference
 // firmware (RockBase-iot/NM-EPD-420, 66727fcf). The standard, non-BW SKU uses
-// the GDEY042Z98 black/white/red panel and has no partial refresh.
+// the GDEY042Z98 black/white/red panel. Although the SSD1683 driver advertises
+// a black-plane differential mode, both full-screen and bounded red-free trials
+// produced a dark wash on the on-hand tri-color glass. AgentDeck therefore
+// forbids refresh_bw() on this SKU and uses stock full-color updates only.
 
 #define BOARD_NAME "NM-EPD-420 4.2 e-ink"
 

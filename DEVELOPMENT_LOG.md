@@ -2,6 +2,35 @@
 
 ---
 
+## 2026-08-30 — 기기별 OFFLINE은 하나의 문법을 쓰고 empty roster와 분리된다
+
+Daemon Offline 표현을 기기마다 별도 예외로 그리던 경로를 연결 상태 정본에 맞춰
+정리했다. 공통 문법은 emissive/color의 near-black 바탕(e-ink는 paper white), muted
+cyan AgentDeck rail, 하나의 큰 상태행과 최대 하나의 보조행이다. 직접 연결하는
+Apple/Android/ESP32는 실제 search/connect/
+reconnect 단계를 말할 수 있지만, daemon이 밀어주는 수동 디스플레이는 수행하지 않는
+재연결을 주장하지 않고 `OFFLINE`만 표시한다. 구체적인 연결 시도가 실패한 경우의
+raw error는 retry/manual-connect 조작이 있는 직접 연결 화면에만 남긴다.
+
+D200H는 가운데 한 키만 쓰던 offline 상태를 5×2 키 전체에 걸친 하나의 카드로 바꿨고,
+어느 키를 눌러도 companion을 연다. 동시에 plugin→daemon transport 상태를 aggregate
+session state와 분리하는 `daemonConnected`를 layout input에 추가했다. 따라서 daemon은
+살아 있지만 session이 0개인 경우 더는 offline으로 오판하지 않고 `HUB READY` /
+`NO SESSION` / `AgentDeck idle` 카드가 나온다. Ulanzi tutorial의 8개 locale도 실제
+full-deck 동작으로 맞췄다.
+
+T-Embed CC1101과 T-Display Pro는 같은 LVGL connection card를 사용하고, InkDeck은
+`OFFLINE` retained sheet와 live-daemon `no active sessions`를 분리했다. 특히 InkDeck의
+후속 refresh가 최초 offline sheet를 빈 roster로 덮던 실제 분기 오류를 수정했다.
+TC001/Pixoo64/iDotMatrix/Timebox는 소비전력을 늘리는 offline animation 없이 정적이고
+희소한 dark badge를 쓰며, 3×5 `N` glyph는 `M`과 같던 형태에서 명확한 대각선으로
+교정했다. Node와 Swift renderer/preview mirror가 같은 픽셀을 생성한다.
+
+검증: TypeScript/Vitest 238 files, 3,717 tests; macOS XCTest 707 tests(2 skipped),
+Android v1.0.10 release APK; preview mirror sync 10 pins; T-Embed/T-Display Pro/
+TC001/InkDeck host simulator offline frames. 네 ESP32 release 환경은 native
+PlatformIO toolchain으로 빌드했다.
+
 ## 2026-08-30 — E-ink 면은 push/pull별 상태 집합이 되고 패널 실측은 device_info가 맡는다
 
 후속 실물 방향 확인에서 LilyGo EPD47의 native scan 방향이 케이스의 읽기 방향과
@@ -28,11 +57,22 @@ full-duplex I2S이고 PA enable은 GPIO41이지만, 이번 display-first 타깃�
 세 보드가 이제 하나의 paper-face 렌더러를 쓴다. InkDeck은 다섯 면을 모두 상시
 허용하고, pull 보드는 GLANCE/DIGEST/ROSTER를 기본으로 하되 물리 입력 뒤 8분
 interactive lease에서만 DECISION/ANSWER를 허용한다. 오프라인은 정적 ROSTER,
-escape와 expiry는 GLANCE다. 400×300 NM은 red action rail과 10초 full-refresh
-게이트, 960×540 EPD47은 PSRAM에 259,200바이트 4-bit 버퍼를 한 번만 할당하는
-responsive layout을 사용한다. 두 보드는 captive portal 대신 USB provisioning을
-기본으로 하여 pull 전력 계약과 Arduino 3 WiFiManager callback 안정성을 함께
-지킨다.
+escape와 expiry는 GLANCE다. 400×300 NM의 SSD1683 B/W differential 경로는 완전히
+금지했다. 전면 실험이 심한 깜빡임과 dark wash를 만든 뒤, red를 제외한 byte-aligned
+`(8,56) 392×244` 영역만 쓰고 old/new RAM을 같게 맞춘 2차 실험도 실물 사진에서 화면
+전체에 균일한 gray veil을 만들었다. 즉 `hasPartialUpdate`는 이 controller의 RAM 주소
+지정 능력이지 장착된 GDEY042Z98 tri-color glass의 파형 호환성 보장이 아니다. NM의
+custom 30,000바이트 B/W/color canvas와 모든 `refresh_bw()` 호출을 제거하고 정식 3색
+full waveform만 남겼다. 부팅 첫 회는 extended waveform으로 pigment plane을 복구하고,
+자동 변화는 5분 단위로 합치며 물리 키만 즉시 갱신한다. red는 상단 brand rail과
+DECISION 왼쪽 rail에 고정해 full-color 주기의 추가 비용 없이 사용한다.
+960×540 EPD47은 PSRAM에 259,200바이트
+4-bit 버퍼를 한 번만 할당하는 responsive layout을 사용한다. 이후 발견된 잔상은
+공장 화면이 아니라 `full` 요청에서도 실제 clear 없이 이전 AgentDeck 이미지를
+덮어쓴 결과였다. 이제 첫 프레임·연결 전환·4회/10분 주기 full refresh에서 vendor
+`epd_clear()` 후 새 이미지를 쓰고, 그 사이만 image-only 갱신한다.
+두 보드는 captive portal 대신 USB provisioning을 기본으로 하여 pull 전력 계약과
+Arduino 3 WiFiManager callback 안정성을 함께 지킨다.
 
 재설계 후 평가를 손재현하지 않도록 InkDeck의 실제 패널 I/O choke point에
 `repaintCount`/`fullRefreshCount` 부팅 이후 누적치를 추가했다. `device_info`의

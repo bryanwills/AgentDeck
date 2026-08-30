@@ -15,6 +15,7 @@ struct LilyEpdRect { int32_t x, y, width, height; };
 void epd_init();
 void epd_poweron();
 void epd_poweroff();
+void epd_clear();
 void epd_draw_grayscale_image(LilyEpdRect area, uint8_t* data);
 }
 // GxEPD color constants are not available on the LilyGo parallel driver.
@@ -78,14 +79,26 @@ static_assert(BOARD_EINK_ROTATION == 0 || BOARD_EINK_ROTATION == 2,
 // the next partial refresh diffs against garbage → faint/ghosted text (the
 // "blurry text" bug on first hardware bring-up).
 #if defined(BOARD_NM_EPD_420)
-constexpr uint32_t MIN_REFRESH_INTERVAL_MS = 10000;
+// The on-hand GDEY042Z98 glass is not stable with SSD1683 refresh_bw(), even
+// inside a red-free window: the B/W waveform eventually lifts black pigment
+// across the whole panel. Use only the stock tri-color waveform and treat this
+// as a slow ambient surface. Physical-key actions still bypass this gate.
+constexpr uint32_t MIN_REFRESH_INTERVAL_MS = 5UL * 60UL * 1000UL;
 #elif defined(BOARD_LILYGO_EPD47)
-constexpr uint32_t MIN_REFRESH_INTERVAL_MS = 5000;
+constexpr uint32_t MIN_REFRESH_INTERVAL_MS = 60000;
 #else
 constexpr uint32_t MIN_REFRESH_INTERVAL_MS = 3000;
 #endif
+#if defined(BOARD_LILYGO_EPD47)
+// The parallel grayscale driver has no previous-frame differential RAM API,
+// so a "full" cycle means an explicit white epd_clear() before drawing. Keep
+// routine image writes quiet, then clear periodically to bound ghosting.
+constexpr uint8_t  FULL_EVERY_N_PARTIALS   = 4;
+constexpr uint32_t FULL_MAX_AGE_MS         = 10UL * 60UL * 1000UL;
+#else
 constexpr uint8_t  FULL_EVERY_N_PARTIALS   = 5;
 constexpr uint32_t FULL_MAX_AGE_MS         = 10UL * 60UL * 1000UL;
+#endif
 
 #if defined(BOARD_LILYGO_EPD47)
 class LilyEpdCanvas final : public Adafruit_GFX {
@@ -136,7 +149,8 @@ private:
 LilyEpdCanvas display;
 #elif defined(BOARD_NM_EPD_420)
 using Panel = GxEPD2_420c_GDEY042Z98;
-GxEPD2_3C<Panel, Panel::HEIGHT> display(Panel(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
+GxEPD2_3C<Panel, Panel::HEIGHT> display(
+    Panel(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
 #else
 using Panel = GxEPD2_750_GDEY075T7;
 GxEPD2_BW<Panel, Panel::HEIGHT> display(Panel(PIN_EPD_CS, PIN_EPD_DC, PIN_EPD_RST, PIN_EPD_BUSY));
@@ -1102,6 +1116,12 @@ enum class PaperFace : uint8_t { Glance, Decision, Answer, Digest, Roster };
 
 PaperFace renderFace = PaperFace::Glance;
 PaperFace manualFace = PaperFace::Glance;
+#if defined(BOARD_NM_EPD_420)
+// Used only to bypass the five-minute content gate for meaningful face/link
+// transitions. It does not enable any partial waveform.
+PaperFace lastPhysicalFace = PaperFace::Glance;
+bool physicalFaceReady = false;
+#endif
 uint32_t faceHoldUntilMs = 0;
 uint32_t interactiveLeaseUntilMs = 0;
 uint32_t suppressedDecisionHash = 0;
@@ -1239,7 +1259,14 @@ int drawParagraph(int16_t x, int16_t y, int16_t maxW, int16_t lineH,
 void drawPaperHeader(const Snap& s, PaperFace face) {
     const int16_t pad = W <= 420 ? 12 : 20;
     const int16_t headerH = W <= 420 ? 48 : 62;
-    const uint16_t accent = face == PaperFace::Decision ? accentColor() : GxEPD_BLACK;
+    const uint16_t accent =
+#if defined(BOARD_NM_EPD_420)
+        // Red is intentionally sparse but visible; every NM repaint already
+        // uses the full color waveform, so this adds no extra refresh cost.
+        accentColor();
+#else
+        face == PaperFace::Decision ? accentColor() : GxEPD_BLACK;
+#endif
     display.fillRect(0, 0, W, W <= 420 ? 7 : 9, accent);
     drawAgentDeckMark(pad, 10, W <= 420 ? 30 : 40);
     textAt(pad + (W <= 420 ? 40 : 54), W <= 420 ? 36 : 46,
@@ -1365,7 +1392,9 @@ void drawDecisionFace(const Snap& s) {
     int16_t oy = top + (W <= 420 ? 62 : 78) + used * (W <= 420 ? 24 : 30);
     for (uint8_t o = 0; o < s.optionCount && o < 3 && oy < H - 24; o++) {
         const int16_t oh = W <= 420 ? 31 : 42;
-        display.drawRoundRect(pad, oy, W - pad * 2, oh, 5, o == 0 ? accentColor() : GxEPD_BLACK);
+        // Keep red geometry fixed across DECISION content so option text can
+        // update through the panel's B/W differential waveform.
+        display.drawRoundRect(pad, oy, W - pad * 2, oh, 5, GxEPD_BLACK);
         char option[56]; snprintf(option, sizeof(option), "%u  %s", (unsigned)(o + 1), s.options[o]);
         char fitted[64]; smartFitText(fitted, sizeof(fitted), option, W - pad * 2 - 20, &FreeSans9pt7b);
         smartTextAt(pad + 10, oy + (W <= 420 ? 21 : 28), fitted, &FreeSans9pt7b);
@@ -1425,12 +1454,18 @@ void drawSearching(const Snap& s) {
     drawBrandHeader(s, layout);
     const int16_t centerY = layout.cards.y + layout.cards.h / 2;
     drawAgentDeckMark(W / 2 - 44, centerY - 88, 88);
-    const char* msg = s.wifiUp || s.serialUp ? "searching for AgentDeck daemon..."
-                                             : "no WiFi — connect USB or provision WiFi";
-    textAt(W / 2 - textWidth(msg, &FreeSansBold12pt7b) / 2, centerY + 46, msg, &FreeSansBold12pt7b);
+    // The panel holds this image without power, so make the terminal state the
+    // primary line and keep the active retry phase as quiet supporting copy.
+    // "no active sessions" remains a distinct live-daemon empty state.
+    const char* title = "OFFLINE";
+    textAt(W / 2 - textWidth(title, &FreeSansBold18pt7b) / 2,
+           centerY + 42, title, &FreeSansBold18pt7b);
+    const char* msg = s.wifiUp || s.serialUp ? "Searching for AgentDeck..."
+                                             : "No WiFi · connect USB or provision WiFi";
+    textAt(W / 2 - textWidth(msg, &FreeSans9pt7b) / 2, centerY + 70, msg, &FreeSans9pt7b);
     if (s.wifiUp && s.ip[0]) {
         char line[64]; snprintf(line, sizeof(line), "panel %s · mDNS _agentdeck._tcp", s.ip);
-        textAt(W / 2 - textWidth(line, &FreeSans9pt7b) / 2, centerY + 76, line, &FreeSans9pt7b);
+        textAt(W / 2 - textWidth(line, CLASSIC_FONT) / 2, centerY + 94, line, CLASSIC_FONT);
     }
     drawUsageFooter(s, true, layout);
 }
@@ -1471,7 +1506,6 @@ bool wasSearching = true;
 char lastTickerShown[104] = "";
 uint32_t repaintCountValue = 0;
 uint32_t fullRefreshCountValue = 0;
-
 bool key1Prev = true, key2Prev = true;
 uint32_t keyLastMs = 0;
 
@@ -1483,20 +1517,27 @@ void refresh(void (*draw)(const Snap&), const Snap& s, bool full) {
     __atomic_add_fetch(&repaintCountValue, 1u, __ATOMIC_RELAXED);
     if (full) __atomic_add_fetch(&fullRefreshCountValue, 1u, __ATOMIC_RELAXED);
 #if defined(BOARD_LILYGO_EPD47)
-    (void)full;
     display.fillScreen(GxEPD_WHITE);
     draw(s);
     epd_poweron();
+    if (full) {
+        // epd_draw_grayscale_image() alone does not erase the prior physical
+        // image. This is the real full refresh that removes both factory art
+        // and old AgentDeck frames before the new framebuffer is written.
+        epd_clear();
+        partialCount = 0;
+        lastFullMs = millis();
+    } else {
+        partialCount++;
+    }
     const LilyEpdRect fullArea{0, 0, SCREEN_W, SCREEN_H};
     epd_draw_grayscale_image(fullArea, display.pixels());
     epd_poweroff();
-    partialCount = 0;
-    lastFullMs = millis();
 #else
 #if defined(BOARD_NM_EPD_420)
-    // The standard tri-color panel has no partial waveform. Treat every
-    // admitted repaint as full-window I/O and never ask GxEPD2 for a fake
-    // partial update that still takes ~10 seconds.
+    // hasPartialUpdate on this driver means partial RAM addressing, not a safe
+    // physical partial waveform for the installed tri-color glass. Never call
+    // refresh_bw(): every admitted NM repaint is a stock full-color cycle.
     full = true;
 #endif
     if (full) {
@@ -1556,14 +1597,30 @@ void init() {
                   "GDEY075T7",
 #endif
                   display.width(), display.height(),
-                  (int)display.epd2.hasFastPartialUpdate);
+                  (int)
+                  display.epd2.hasFastPartialUpdate
+                  );
 #endif
     // static: Snap grew past 5KB (10 rows × work[152] + the multi-row strip)
     // — too big for the loop-task stack alongside the GxEPD2 page render.
     // init() and render() run on the same Core 1 loop task, so one static
     // scratch Snap is race-free.
     static Snap s; snapshot(s);
-    refresh(drawSearching, s, true);
+    const bool initialSearching = !s.bridgeConnected;
+    renderFace = initialSearching ? PaperFace::Roster : PaperFace::Glance;
+#if defined(BOARD_NM_EPD_420)
+    // Recondition both pigment planes after any prior experimental B/W cycle.
+    // The extended stock color waveform writes the complete intended frame;
+    // subsequent repaints use the normal fast full-color waveform only.
+    display.epd2.selectFastFullUpdate(false);
+#endif
+    refresh(initialSearching ? drawSearching : drawDashboard, s, true);
+#if defined(BOARD_NM_EPD_420)
+    display.epd2.selectFastFullUpdate(true);
+    lastPhysicalFace = renderFace;
+    physicalFaceReady = true;
+#endif
+    wasSearching = initialSearching;
     // init() is once-per-boot on hardware, but the host simulator reuses this
     // translation unit across multiple named scenes. The searching frame above
     // replaces the framebuffer, so invalidate the prior scene hash even when
@@ -1663,16 +1720,31 @@ void render() {
     }
     uint32_t h = paperHash(s, renderFace);
     if (h == lastHash && !forceFull) return;
-    if (!forceFull && (now - lastDrawMs) < MIN_REFRESH_INTERVAL_MS) return;  // coalesce bursts
+    bool urgentTransition = searching != wasSearching;
+#if defined(BOARD_NM_EPD_420)
+    urgentTransition = urgentTransition || !physicalFaceReady || renderFace != lastPhysicalFace;
+#endif
+    if (!forceFull && !urgentTransition &&
+        (now - lastDrawMs) < MIN_REFRESH_INTERVAL_MS) return;  // coalesce bursts
 
     bool full = forceFull || firstDraw ||
                 partialCount >= FULL_EVERY_N_PARTIALS ||
                 (now - lastFullMs) > FULL_MAX_AGE_MS ||
                 (searching != wasSearching);
-#if defined(BOARD_NM_EPD_420) || defined(BOARD_LILYGO_EPD47)
+#if defined(BOARD_NM_EPD_420)
+    // The installed tri-color glass darkens under refresh_bw(), even when the
+    // RAM window excludes every red pixel. Stock full-color waveform only.
     full = true;
 #endif
-    refresh(drawDashboard, s, full);
+    // Keep transport-offline distinct from a live daemon with an empty roster.
+    // init() already uses this split; subsequent refreshes must preserve it or
+    // the first timed repaint replaces OFFLINE with "no active sessions".
+    refresh(searching ? drawSearching : drawDashboard, s, full);
+
+#if defined(BOARD_NM_EPD_420)
+    lastPhysicalFace = renderFace;
+    physicalFaceReady = true;
+#endif
 
     lastHash = h;
     lastDrawMs = now;

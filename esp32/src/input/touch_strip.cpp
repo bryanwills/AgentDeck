@@ -28,6 +28,33 @@ static constexpr uint32_t TAP_MAX_MS = 450;
 static constexpr uint32_t HOLD_MS = 700;
 static constexpr int16_t SWIPE_MIN_PX = 55;
 
+struct LandscapePoint {
+    int16_t x;
+    int16_t y;
+};
+
+// Map the controller's native 222x480 portrait coordinates into the current
+// 480x222 Focus Strip rotation. Keeping this tied to BOARD_ROTATION prevents a
+// display-only 180-degree change from silently reversing taps and swipes.
+static constexpr LandscapePoint mapLandscapePoint(int16_t x, int16_t y) {
+#if BOARD_ROTATION == 1
+    return {y, (int16_t)(BOARD_NATIVE_W - 1 - x)};
+#elif BOARD_ROTATION == 3
+    return {(int16_t)(BOARD_NATIVE_H - 1 - y), x};
+#else
+#error "T-Display-S3-Pro Focus Strip requires landscape rotation 1 or 3"
+#endif
+}
+
+#if BOARD_ROTATION == 3
+static_assert(mapLandscapePoint(0, 0).x == BOARD_NATIVE_H - 1 &&
+              mapLandscapePoint(0, 0).y == 0,
+              "rotation-3 top-left touch mapping drifted");
+static_assert(mapLandscapePoint(BOARD_NATIVE_W - 1, BOARD_NATIVE_H - 1).x == 0 &&
+              mapLandscapePoint(BOARD_NATIVE_W - 1, BOARD_NATIVE_H - 1).y == BOARD_NATIVE_W - 1,
+              "rotation-3 bottom-right touch mapping drifted");
+#endif
+
 namespace Input {
 
 bool touchInit() {
@@ -96,14 +123,12 @@ TouchEvent touchPoll(uint32_t nowMs) {
         s_downSamples++;
         if (xs[0] > s_maxX) s_maxX = xs[0];
         if (ys[0] > s_maxY) s_maxY = ys[0];
-        // The CST226SE reports panel-native portrait (222x480); the strip UI
-        // is landscape 480x222 (rotation 1). Confirmed by corner forensics:
-        // raw (184,16) was a landscape top-left tap, which matches exactly
-        // one of the four canonical transforms. Without this, every hit
-        // region misfired and horizontal swipes measured the wrong axis.
-        int16_t rx = xs[0];
-        xs[0] = ys[0];
-        ys[0] = (int16_t)(BOARD_NATIVE_W - 1) - rx;
+        // The CST226SE reports panel-native portrait (222x480); map it through
+        // the same landscape rotation as the panel. Without this, a display
+        // flip leaves every hit region mirrored and reverses horizontal swipes.
+        LandscapePoint mapped = mapLandscapePoint(xs[0], ys[0]);
+        xs[0] = mapped.x;
+        ys[0] = mapped.y;
     }
 
     if (down && !prevDown) {
