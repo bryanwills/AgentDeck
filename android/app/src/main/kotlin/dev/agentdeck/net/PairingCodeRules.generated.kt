@@ -22,6 +22,9 @@ object PairingCodeRules {
     /** How long an operator-opened window stays open, in milliseconds. */
     const val WINDOW_MS = 120000L
 
+    /** Port a typed address means when it carries none. */
+    const val DEFAULT_DAEMON_PORT = 9120
+
     /** Wrong codes the whole window tolerates before it closes. */
     const val MAX_FAILED_ATTEMPTS = 5
 
@@ -48,5 +51,62 @@ object PairingCodeRules {
         val normalized = normalize(code) ?: return code
         val half = DIGITS / 2
         return "${normalized.substring(0, half)} ${normalized.substring(half)}"
+    }
+
+    data class DaemonAddress(val host: String, val port: Int)
+
+    /**
+     * Parse an operator-typed daemon address into host + port.
+     *
+     * The code path is otherwise gated on discovery — a client spends a code
+     * against a daemon it found over mDNS — so on a network where multicast is
+     * filtered the six-digit path is unreachable by exactly the camera-less
+     * devices it was built for. Shared with the other client because the two
+     * must agree what a bare `192.168.1.5` means.
+     */
+    fun parseDaemonAddress(input: String?): DaemonAddress? {
+        var text = input?.trim().orEmpty()
+        if (text.isEmpty()) return null
+        val scheme = text.indexOf("://")
+        if (scheme >= 0) text = text.substring(scheme + 3)
+        for (cut in listOf("/", "?", "#")) {
+            val at = text.indexOf(cut)
+            if (at >= 0) text = text.substring(0, at)
+        }
+        if (text.isEmpty()) return null
+
+        var host = text
+        var port = DEFAULT_DAEMON_PORT
+
+        if (text.startsWith("[")) {
+            val close = text.indexOf(']')
+            if (close < 0) return null
+            host = text.substring(1, close)
+            val rest = text.substring(close + 1)
+            if (rest.startsWith(":")) {
+                port = parsePort(rest.substring(1)) ?: return null
+            } else if (rest.isNotEmpty()) {
+                return null
+            }
+        } else {
+            val colons = text.count { it == ':' }
+            if (colons == 1) {
+                val at = text.lastIndexOf(':')
+                port = parsePort(text.substring(at + 1)) ?: return null
+                host = text.substring(0, at)
+            } else if (colons > 1) {
+                // A bare IPv6 literal carries its own colons and no port.
+                host = text
+            }
+        }
+
+        if (host.isEmpty()) return null
+        return DaemonAddress(host, port)
+    }
+
+    private fun parsePort(text: String): Int? {
+        if (text.isEmpty() || text.length > 5 || !text.all { it in '0'..'9' }) return null
+        val value = text.toIntOrNull() ?: return null
+        return if (value in 1..65535) value else null
     }
 }

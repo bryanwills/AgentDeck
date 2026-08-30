@@ -25,6 +25,9 @@ enum PairingCodeRules {
     /// Credentials one window hands out unless the operator asks for more.
     static let defaultRedemptions = 1
 
+    /// Port a typed address means when it carries none.
+    static let DEFAULT_DAEMON_PORT = 9120
+
     /// State a daemon keeps for an open window, and all these rules read.
     struct WindowSnapshot: Sendable {
         var code: String
@@ -129,5 +132,64 @@ enum PairingCodeRules {
         let remaining = window.expiresAt - now
         if remaining <= 0 { return 0 }
         return (remaining + 999) / 1000
+    }
+
+    struct DaemonAddress: Equatable, Sendable {
+        let host: String
+        let port: Int
+    }
+
+    /// Parse an operator-typed daemon address into host + port.
+    ///
+    /// The code path is otherwise gated on discovery — a client spends a code
+    /// against a daemon it found over mDNS — so on a network where multicast is
+    /// filtered the six-digit path is unreachable by exactly the camera-less
+    /// devices it was built for. Shared with the other client because the two
+    /// must agree what a bare `192.168.1.5` means; if they defaulted to
+    /// different ports, the same string typed on two devices in one room would
+    /// reach different daemons and it would look like a bad code.
+    static func parseDaemonAddress(_ input: String?) -> DaemonAddress? {
+        guard var text = input?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        if let scheme = text.range(of: "://") { text = String(text[scheme.upperBound...]) }
+        for cut in ["/", "?", "#"] {
+            if let at = text.range(of: cut) { text = String(text[..<at.lowerBound]) }
+        }
+        if text.isEmpty { return nil }
+
+        var host = text
+        var port = DEFAULT_DAEMON_PORT
+
+        if text.hasPrefix("[") {
+            guard let close = text.firstIndex(of: "]") else { return nil }
+            host = String(text[text.index(after: text.startIndex)..<close])
+            let rest = String(text[text.index(after: close)...])
+            if rest.hasPrefix(":") {
+                guard let parsed = parsePort(String(rest.dropFirst())) else { return nil }
+                port = parsed
+            } else if !rest.isEmpty {
+                return nil
+            }
+        } else {
+            let colons = text.filter { $0 == ":" }.count
+            if colons == 1 {
+                guard let at = text.lastIndex(of: ":") else { return nil }
+                guard let parsed = parsePort(String(text[text.index(after: at)...])) else { return nil }
+                host = String(text[..<at])
+                port = parsed
+            } else if colons > 1 {
+                // A bare IPv6 literal carries its own colons and no port, so a
+                // trailing `:9120` cannot be told from part of the address.
+                host = text
+            }
+        }
+
+        if host.isEmpty { return nil }
+        return DaemonAddress(host: host, port: port)
+    }
+
+    private static func parsePort(_ text: String) -> Int? {
+        guard !text.isEmpty, text.count <= 5, text.allSatisfy({ $0.isASCII && $0.isNumber }),
+              let value = Int(text), value >= 1, value <= 65535 else { return nil }
+        return value
     }
 }

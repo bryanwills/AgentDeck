@@ -116,6 +116,97 @@ export function isPairingCode(code: unknown): boolean {
  * Read aloud and typed on a reader's keyboard, so it is chunked. The chunk is
  * half the code, which for six digits is the same grouping a phone number uses.
  */
+/**
+ * The daemon port a bare address means, mirroring the canonical port the daemon
+ * prefers. Typing an address is the fallback for a device that cannot discover
+ * one, and on that path nobody is around to notice a port typo — so the default
+ * has to be the port the daemon actually wants, not a guess.
+ */
+export const DEFAULT_DAEMON_PORT = 9120;
+
+export interface DaemonAddress {
+  host: string;
+  port: number;
+}
+
+/**
+ * Parse an operator-typed daemon address into host + port.
+ *
+ * This exists because the pairing CODE path is gated on discovery: a client
+ * spends a code against a daemon it found over mDNS, so on a network where
+ * multicast is filtered — which is the normal state of a guest SSID, an
+ * isolating AP, or a segmented VLAN — the six-digit path is unreachable by
+ * exactly the camera-less devices it was built for. Letting the address be
+ * typed restores it without reintroducing the 32-character token those devices
+ * were stuck copying.
+ *
+ * Shared rather than written per client because the two surfaces must agree on
+ * what a bare `192.168.1.5` means. If Android defaulted to 9120 and iOS to
+ * something else, the same string typed on two devices in the same room would
+ * reach different daemons, and the failure would look like a bad code.
+ *
+ * Deliberately permissive about what it strips (scheme, path, query) and strict
+ * about what it accepts (a non-empty host, a port in range): people paste the
+ * URL they were shown, and a rejected paste is a dead end on a device with a
+ * bad keyboard.
+ */
+export function parseDaemonAddress(input: unknown): DaemonAddress | null {
+  if (typeof input !== 'string') return null;
+  let text = input.trim();
+  if (!text) return null;
+
+  const scheme = text.indexOf('://');
+  if (scheme >= 0) text = text.slice(scheme + 3);
+  // Anything after the authority is not ours to interpret — notably `?token=`,
+  // which someone pasting the QR window's URL will bring along.
+  for (const cut of ['/', '?', '#']) {
+    const at = text.indexOf(cut);
+    if (at >= 0) text = text.slice(0, at);
+  }
+  if (!text) return null;
+
+  let host = text;
+  let port = DEFAULT_DAEMON_PORT;
+
+  if (text.startsWith('[')) {
+    // Bracketed IPv6 literal: `[::1]` or `[::1]:9120`.
+    const close = text.indexOf(']');
+    if (close < 0) return null;
+    host = text.slice(1, close);
+    const rest = text.slice(close + 1);
+    if (rest.startsWith(':')) {
+      const parsed = parsePort(rest.slice(1));
+      if (parsed === null) return null;
+      port = parsed;
+    } else if (rest.length > 0) {
+      return null;
+    }
+  } else {
+    const colons = text.split(':').length - 1;
+    if (colons === 1) {
+      const at = text.lastIndexOf(':');
+      const parsed = parsePort(text.slice(at + 1));
+      if (parsed === null) return null;
+      host = text.slice(0, at);
+      port = parsed;
+    } else if (colons > 1) {
+      // A bare IPv6 literal carries colons of its own and no port, so a
+      // trailing `:9120` here is indistinguishable from part of the address.
+      // Treat the whole thing as the host and take the default port.
+      host = text;
+    }
+  }
+
+  if (!host) return null;
+  return { host, port };
+}
+
+function parsePort(text: string): number | null {
+  if (!/^[0-9]{1,5}$/.test(text)) return null;
+  const value = Number(text);
+  return value >= 1 && value <= 65535 ? value : null;
+}
+
 export function formatPairingCode(code: string): string {
   const normalized = normalizePairingCode(code);
   if (!normalized) return code;
