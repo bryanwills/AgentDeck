@@ -54,10 +54,13 @@ struct DevicePairingWindow: View {
                 Text("Pair a device")
                     .font(HUDFont.title)
 
-                Text("Pick the path your device can actually take.")
+                Text("Approve a device that is already asking, or hand it a code.")
                     .font(HUDFont.body)
                     .foregroundStyle(TerrariumHUD.subtext)
+                    .multilineTextAlignment(.center)
 
+                knockSection
+                Divider().opacity(0.25)
                 cameraSection
                 Divider().opacity(0.25)
                 codeSection
@@ -71,7 +74,7 @@ struct DevicePairingWindow: View {
             }
             .padding(20)
         }
-        .frame(width: 420, height: 640)
+        .frame(width: 440, height: 720)
         .aquariumSurface()
         .onAppear { pairing.bind(portProvider: { port }) }
         .task {
@@ -81,6 +84,87 @@ struct DevicePairingWindow: View {
             while !Task.isCancelled {
                 await pairing.refresh()
                 try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    // MARK: - Approval path
+
+    /// The path that asks nothing of the device. The daemon already refuses an
+    /// unauthenticated peer and knows its address; this turns that refusal into
+    /// a prompt. It is also the stronger trust model of the two on this window:
+    /// a code trusts whoever knows a secret, an approval trusts a peer the
+    /// operator pointed at, and an attacker cannot approve themselves.
+    private var knockSection: some View {
+        VStack(spacing: 10) {
+            HUDSectionHeader(title: "WAITING TO CONNECT")
+
+            if pairing.knocks.isEmpty {
+                Text("Nothing is asking right now. A device appears here within seconds of trying to connect.")
+                    .font(HUDFont.caption)
+                    .foregroundStyle(TerrariumHUD.subtext)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(pairing.knocks) { knock in
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            // The address, never a name the device chose for
+                            // itself: at handshake time the IP is the only fact
+                            // the daemon has, and a claimed name is attacker
+                            // -controlled text.
+                            Text(knock.ip)
+                                .font(HUDFont.mono)
+                                .foregroundStyle(.white)
+                            Text(knock.detail)
+                                .font(HUDFont.monoSmall)
+                                .foregroundStyle(TerrariumHUD.subtext)
+                        }
+                        Spacer()
+                        Button("Approve") { Task { await pairing.approve(knock.ip) } }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .disabled(pairing.busy)
+                        Button("Dismiss") { Task { await pairing.dismiss(knock.ip) } }
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
+                            .tint(TerrariumHUD.subtext)
+                            .disabled(pairing.busy)
+                    }
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 8)
+                    .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+                }
+            }
+
+            if !pairing.approvedPeers.isEmpty {
+                DisclosureGroup("Approved (\(pairing.approvedPeers.count))") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        // An approval keys on the address, so a DHCP lease change
+                        // retires it and the device knocks again. Say so here
+                        // rather than letting the row imply it follows the device.
+                        Text("These addresses connect without a token. A new DHCP address means approving again.")
+                            .font(HUDFont.monoSmall)
+                            .foregroundStyle(TerrariumHUD.subtext)
+                            .fixedSize(horizontal: false, vertical: true)
+                        ForEach(pairing.approvedPeers, id: \.self) { ip in
+                            HStack {
+                                Text(ip)
+                                    .font(HUDFont.monoSmall)
+                                    .foregroundStyle(TerrariumHUD.subtext)
+                                Spacer()
+                                Button("Revoke") { Task { await pairing.revoke(ip) } }
+                                    .buttonStyle(.borderless)
+                                    .controlSize(.small)
+                                    .tint(TerrariumHUD.ledAmber)
+                                    .disabled(pairing.busy)
+                            }
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+                .font(HUDFont.caption)
+                .foregroundStyle(TerrariumHUD.subtext)
             }
         }
     }

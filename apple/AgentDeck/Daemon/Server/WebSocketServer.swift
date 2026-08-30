@@ -310,7 +310,19 @@ actor WebSocketServer {
         if !AuthManager.shared.isLocalConnection(remoteIP) {
             let parsed = HTTPServer.parseHTTPRequest(requestData, remoteIP: remoteIP)
             let token = parsed.queryParams["token"] ?? ""
-            guard AuthManager.shared.validateToken(token) else {
+            // A peer the operator approved in the app authenticates by address.
+            // That is the same grant a pairing code would have minted, made
+            // without asking the device to type anything — which is the only
+            // form a camera-less reader can actually complete. See
+            // PairingKnockStore for why the IP is the identity here: this
+            // decision happens at the handshake, and `client_register` (where a
+            // device says what it is) cannot arrive until after a socket exists.
+            let approvedPeer = PairingKnockStore.shared.isApproved(remoteIP)
+            guard approvedPeer || AuthManager.shared.validateToken(token) else {
+                // Record before refusing: the refusal is the only moment the
+                // daemon learns this device wants in, and until it was surfaced
+                // a device with no credential retried forever into a log.
+                PairingKnockStore.shared.record(ip: remoteIP, staleToken: !token.isEmpty)
                 // The two cases read very differently to an operator: a peer
                 // that presented nothing is usually an unpaired client, while a
                 // peer presenting a token we do not accept is a provisioned

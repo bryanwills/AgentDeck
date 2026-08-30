@@ -68,6 +68,10 @@ enum AgentDeckPaths {
     static var authToken: URL { baseDirectory.appendingPathComponent("auth-token") }
     /// Tokens still accepted but no longer handed out — see `AuthManager.adoptPeerToken`.
     static var authTokenAccepted: URL { baseDirectory.appendingPathComponent("auth-token-accepted") }
+    /// Peers the operator approved from the app instead of spending a pairing
+    /// code. Persisted so an approval survives a restart — an approval the user
+    /// has to repeat every launch is not an approval.
+    static var pairingApproved: URL { baseDirectory.appendingPathComponent("pairing-approved.json") }
     static var sessionsJson: URL { baseDirectory.appendingPathComponent("sessions.json") }
     static var settingsJson: URL { baseDirectory.appendingPathComponent("settings.json") }
     static var timelineJson: URL { baseDirectory.appendingPathComponent("timeline.json") }

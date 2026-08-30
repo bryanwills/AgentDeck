@@ -22,6 +22,21 @@ import Foundation
 @MainActor
 final class PairingCodeController: ObservableObject {
 
+    struct Knock: Identifiable, Equatable {
+        var id: String { ip }
+        let ip: String
+        let attempts: Int
+        let staleToken: Bool
+
+        /// A device that presented a token we no longer accept is a different
+        /// story from one that presented nothing, and the operator's next move
+        /// differs — so never collapse the two into "unknown device".
+        var detail: String {
+            let tries = attempts == 1 ? "1 attempt" : "\(attempts) attempts"
+            return staleToken ? "\(tries) · stale credential" : tries
+        }
+    }
+
     struct Redemption: Identifiable, Equatable {
         let id: Int          // epoch ms — unique per redemption within a window
         let name: String
@@ -41,6 +56,13 @@ final class PairingCodeController: ObservableObject {
     @Published private(set) var redemptions: [Redemption] = []
     @Published private(set) var failureCount = 0
     @Published private(set) var busy = false
+
+    /// Peers the daemon refused and the operator has not answered yet. This is
+    /// the primary path now: the device does nothing, and the operator approves
+    /// an address they can see. See PairingKnockStore for why the identity is
+    /// an IP and what that costs (a DHCP lease change retires an approval).
+    @Published private(set) var knocks: [Knock] = []
+    @Published private(set) var approvedPeers: [String] = []
     @Published private(set) var error: String?
 
     /// Resolved per call rather than stored: the daemon can move ports under
@@ -104,6 +126,41 @@ final class PairingCodeController: ObservableObject {
             )
         }
         failureCount = (json["failures"] as? [[String: Any]] ?? []).count
+        await refreshKnocks()
+    }
+
+    private func refreshKnocks() async {
+        guard let json = try? await get("/pair/knocks") else { return }
+        knocks = (json["knocks"] as? [[String: Any]] ?? []).map {
+            Knock(
+                ip: $0["ip"] as? String ?? "",
+                attempts: ($0["attempts"] as? NSNumber)?.intValue ?? 0,
+                staleToken: $0["staleToken"] as? Bool ?? false
+            )
+        }.filter { !$0.ip.isEmpty }
+        approvedPeers = (json["approved"] as? [[String: Any]] ?? [])
+            .compactMap { $0["ip"] as? String }
+    }
+
+    func approve(_ ip: String) async {
+        busy = true
+        defer { busy = false }
+        _ = try? await post("/pair/approve", body: ["ip": ip])
+        await refreshKnocks()
+    }
+
+    func dismiss(_ ip: String) async {
+        busy = true
+        defer { busy = false }
+        _ = try? await post("/pair/dismiss", body: ["ip": ip])
+        await refreshKnocks()
+    }
+
+    func revoke(_ ip: String) async {
+        busy = true
+        defer { busy = false }
+        _ = try? await post("/pair/revoke", body: ["ip": ip])
+        await refreshKnocks()
     }
 
     // MARK: - Transport

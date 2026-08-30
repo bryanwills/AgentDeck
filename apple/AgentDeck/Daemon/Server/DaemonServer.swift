@@ -2783,9 +2783,15 @@ final class DaemonServer {
             if !tokenValid, let auth = request.headers["authorization"], auth.hasPrefix("Bearer "),
                AuthManager.shared.validateToken(String(auth.dropFirst("Bearer ".count))) { tokenValid = true }
             let pairingOpen = await PairingWindowStore.shared.isOpen()
+            // An operator-approved peer is authenticated; it simply carries its
+            // credential as an address rather than a token (PairingKnockStore).
+            // Folded in here rather than as a third parameter so
+            // httpAccessResponse stays the pure truth table its test drives —
+            // "authenticated" is one input, however the peer earned it.
+            let authenticated = tokenValid || PairingKnockStore.shared.isApproved(request.remoteIP)
             return Self.httpAccessResponse(
                 method: request.method, path: request.path,
-                isLocal: isLocal, tokenValid: tokenValid, daemonPort: daemonPort,
+                isLocal: isLocal, tokenValid: authenticated, daemonPort: daemonPort,
                 pairingWindowOpen: pairingOpen)
         }
 
@@ -2835,6 +2841,60 @@ final class DaemonServer {
         await httpServer.post("/pair/close") { _ in
             await PairingWindowStore.shared.close()
             return .json(["open": false])
+        }
+
+        // ── Operator approval ─────────────────────────────────────────────
+        // The other half of pairing, and the half a camera-less device can
+        // actually complete: instead of the DEVICE proving it knows a secret,
+        // the operator points at a peer that is already knocking. These sit
+        // behind the normal gate like the window routes above — a remote peer
+        // able to approve itself would be granting itself a credential.
+        await httpServer.get("/pair/knocks") { _ in
+            let knocks = PairingKnockStore.shared.knocks()
+            let approvals = PairingKnockStore.shared.approvals()
+            return .json([
+                "knocks": knocks.map {
+                    [
+                        "ip": $0.ip,
+                        "attempts": $0.attempts,
+                        "firstSeen": Int($0.firstSeen.timeIntervalSince1970 * 1000),
+                        "lastSeen": Int($0.lastSeen.timeIntervalSince1970 * 1000),
+                        "staleToken": $0.staleToken,
+                    ]
+                },
+                "approved": approvals.map {
+                    ["ip": $0.ip, "approvedAt": Int($0.approvedAt.timeIntervalSince1970 * 1000)]
+                },
+            ])
+        }
+
+        await httpServer.post("/pair/approve") { request in
+            guard let ip = Self.jsonBody(request.body)["ip"] as? String, !ip.isEmpty else {
+                return .json(["error": "ip required"], status: 400)
+            }
+            PairingKnockStore.shared.approve(ip: ip)
+            DaemonLogger.shared.info("WS: operator approved \(ip)")
+            return .json(["approved": ip])
+        }
+
+        await httpServer.post("/pair/revoke") { request in
+            guard let ip = Self.jsonBody(request.body)["ip"] as? String, !ip.isEmpty else {
+                return .json(["error": "ip required"], status: 400)
+            }
+            PairingKnockStore.shared.revoke(ip: ip)
+            DaemonLogger.shared.info("WS: operator revoked \(ip)")
+            return .json(["revoked": ip])
+        }
+
+        // Dismiss is not a denylist — see PairingKnockStore.dismiss for why an
+        // IP-keyed block would be theatre. It clears the row; the peer may knock
+        // again and reappear.
+        await httpServer.post("/pair/dismiss") { request in
+            guard let ip = Self.jsonBody(request.body)["ip"] as? String, !ip.isEmpty else {
+                return .json(["error": "ip required"], status: 400)
+            }
+            PairingKnockStore.shared.dismiss(ip: ip)
+            return .json(["dismissed": ip])
         }
 
         await httpServer.get("/health") { [weak self] _ in

@@ -123,6 +123,7 @@
 		38B8B9D479D582EE034C05DB /* ApmeCategoryE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F083DDE39507B6693AED227 /* ApmeCategoryE2ETests.swift */; };
 		38E9C043A76BB267FCACB4B7 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA58B8921954E616F8ECCC53 /* SettingsScreen.swift */; };
 		3935F4C5BEE0F6FA479AB2A6 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 908DB05568DE4E828CD7FCE6 /* Logger.swift */; };
+		39DE6C000AD9F73337D71752 /* PairingKnockStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBAF5DDA8E8BC581088C6AAD /* PairingKnockStore.swift */; };
 		3A0913B4B8FD471CDFD77631 /* WifiConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51DA1104DBFD7C9FA0C79A5D /* WifiConfig.swift */; };
 		3AB4FFE7850E2A1AB615E162 /* ApmeParseJudgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DB04CEEDD6C769AD9056561 /* ApmeParseJudgeTests.swift */; };
 		3C1F74B5C8002F65FFDA282F /* ProcessEnumerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32CE020EB705544FFD580DD9 /* ProcessEnumerator.swift */; };
@@ -362,6 +363,7 @@
 		B7AC1325F3226677AF160B50 /* TaskTitleRules.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECF625C2B3057379F5CFA1B0 /* TaskTitleRules.generated.swift */; };
 		B8830354996DCFC054A9AD5A /* TimelineRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8884FD5EE02A0EDAF5D6C448 /* TimelineRelay.swift */; };
 		B88EAABE4E7D9CEB126CE830 /* ApmeJudgeOpenAI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26A4C8A53C312709350735F5 /* ApmeJudgeOpenAI.swift */; };
+		B8A58BEA3BF15099FEA4DD0D /* PairingKnockStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBAF5DDA8E8BC581088C6AAD /* PairingKnockStore.swift */; };
 		B9625008665F0FFF8CB98581 /* PairingCodeRules.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C75E7B3676BD283B9A4BE27 /* PairingCodeRules.generated.swift */; };
 		B9A16BFB5249C6389638BCD0 /* PairingCredential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E868DDC13347FD992B9AF3D /* PairingCredential.swift */; };
 		BA2CB0DAA113D75AF63951DD /* MicroGlyphs.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1603E1F58E35F85044D7913A /* MicroGlyphs.generated.swift */; };
@@ -745,6 +747,7 @@
 		C7B2EDFD5ED44F2D0F6D7E71 /* PairingWindowStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingWindowStoreTests.swift; sourceTree = "<group>"; };
 		C8404D4037BF665BA54E03F0 /* InkDeckPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkDeckPreview.swift; sourceTree = "<group>"; };
 		CAA529E02014523C9AD2CD0E /* UnauthorizedCloseCodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnauthorizedCloseCodeTests.swift; sourceTree = "<group>"; };
+		CBAF5DDA8E8BC581088C6AAD /* PairingKnockStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingKnockStore.swift; sourceTree = "<group>"; };
 		CBBE1258602AB5ABC83560EE /* ApmeSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeSettings.swift; sourceTree = "<group>"; };
 		CCEE70EEDDCA2199E894D275 /* GaugeBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GaugeBar.swift; sourceTree = "<group>"; };
 		CD7B38A97F5852FE0E8249C2 /* AttentionTheaterHUD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionTheaterHUD.swift; sourceTree = "<group>"; };
@@ -1346,6 +1349,7 @@
 				B857A690693DD802AA05429D /* DaemonServer.swift */,
 				6176599CD3E03A96EA977362 /* ESP32WifiOta.swift */,
 				7FF390BEA92326B1152B55A9 /* HTTPServer.swift */,
+				CBAF5DDA8E8BC581088C6AAD /* PairingKnockStore.swift */,
 				E6F0B91327EB48703713A68C /* PairingWindowStore.swift */,
 				BDEFB32CAC64614A563E7C31 /* SwiftSurfaceFirmwareStore.swift */,
 				7AC67585E8BFBBB8B0250FF2 /* WebSocketServer.swift */,
@@ -1794,6 +1798,7 @@
 				9EC638F130D8419C32A2C027 /* PairingCodeController.swift in Sources */,
 				89A363F94C2724369D586398 /* PairingCodeRules.generated.swift in Sources */,
 				B9A16BFB5249C6389638BCD0 /* PairingCredential.swift in Sources */,
+				39DE6C000AD9F73337D71752 /* PairingKnockStore.swift in Sources */,
 				942417AA37DAD475B023BED1 /* PairingWindowStore.swift in Sources */,
 				3053AF2926E3B907DAB9250F /* PixooModule.swift in Sources */,
 				378C03BA7C86CFABDD41FA06 /* PixooPreview.swift in Sources */,
@@ -1994,6 +1999,7 @@
 				0DB57F4D3BAAD25B7622574A /* PairingCodeController.swift in Sources */,
 				B9625008665F0FFF8CB98581 /* PairingCodeRules.generated.swift in Sources */,
 				BE4468940AAC6546E849E2BF /* PairingCredential.swift in Sources */,
+				B8A58BEA3BF15099FEA4DD0D /* PairingKnockStore.swift in Sources */,
 				C1D11334892B586DEBC70D4F /* PairingWindowStore.swift in Sources */,
 				43CA9C8F949377526F62C044 /* PixooModule.swift in Sources */,
 				83FE9645B23326BD78B52126 /* PixooPreview.swift in Sources */,
