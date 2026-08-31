@@ -114,8 +114,18 @@ fun DashboardState.toTerrariumState(
     // bubbles) should also pick up sibling activity. Promote the most
     // active sibling state when it outranks the primary's own state, so
     // that e.g. "openclaw idle + claude processing" still feels active.
+    //
+    // Spelled out per the sentence above, because the shorter form it replaces
+    // — "any sibling shares my agentType" — is true of every ordinary session:
+    // `siblingSessions` CONTAINS the focused session (which is why each sibling
+    // loop below skips it by id), so the primary always matched itself and the
+    // predicate collapsed to `agentType != null`. Every `!isDaemonLike` branch
+    // is a primary creature, so the focused session got none from the primary
+    // path and was skipped by the sibling path — one session in view meant no
+    // creature at all. The tests that covered this passed by leaving
+    // `siblingSessions` empty, a shape the daemon never sends.
     val isDaemonLike = agentType == "daemon" ||
-        (agentType != null && siblingSessions.any { it.agentType == agentType })
+        (agentType == "openclaw" && siblingSessions.any { it.agentType == "openclaw" })
     val effectiveAgentState = if (isDaemonLike) {
         val mostActive = mostActiveSessionState(siblingSessions)
         when {

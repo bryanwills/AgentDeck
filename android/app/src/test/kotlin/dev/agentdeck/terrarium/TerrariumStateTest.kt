@@ -4,6 +4,7 @@ import dev.agentdeck.net.AgentState
 import dev.agentdeck.net.SessionInfo
 import dev.agentdeck.state.DashboardState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -23,6 +24,72 @@ class TerrariumStateTest {
         assertEquals(1, terrarium.openCodeCreatures.size)
         assertEquals("kiro-cli", terrarium.openCodeCreatures.single().agentType)
         assertEquals(OctopusVisualState.WORKING, terrarium.openCodeCreatures.single().visualState)
+    }
+
+    // The daemon sends every session in `sessions_list`, and the focused one is
+    // among them — `siblingSessions` therefore always contains the primary
+    // itself, which is why every sibling loop below skips it by id. A fixture
+    // that leaves the list empty describes a state production never produces,
+    // and the tests above did exactly that, which is how the primary creature
+    // could stop rendering without a single assertion noticing.
+
+    @Test
+    fun `a focused session keeps its creature when the list contains itself`() {
+        val self = SessionInfo(
+            id = "claude:primary", port = 9120, agentType = "claude-code",
+            alive = true, state = "processing",
+        )
+        val terrarium = DashboardState(
+            agentState = AgentState.PROCESSING,
+            agentType = "claude-code",
+            sessionId = self.id,
+            siblingSessions = listOf(self),
+        ).toTerrariumState()
+
+        assertEquals(1, terrarium.agents.size)
+        assertEquals("claude-code", terrarium.agents.single().agentType)
+        assertTrue(terrarium.agents.single().isPrimary)
+    }
+
+    @Test
+    fun `a second session of the same agent does not suppress the focused one`() {
+        // Two Claude sessions is the ordinary case, not an aggregate view. The
+        // sibling loop skips the focused session by id, so if the primary
+        // branch also declines it the focused session has no creature at all.
+        val self = SessionInfo(
+            id = "claude:a", port = 9120, agentType = "claude-code",
+            alive = true, state = "processing",
+        )
+        val other = SessionInfo(
+            id = "claude:b", port = 9120, agentType = "claude-code",
+            alive = true, state = "idle",
+        )
+        val terrarium = DashboardState(
+            agentState = AgentState.PROCESSING,
+            agentType = "claude-code",
+            sessionId = self.id,
+            siblingSessions = listOf(self, other),
+        ).toTerrariumState()
+
+        assertEquals(2, terrarium.agents.size)
+        assertEquals(setOf("claude:a", "claude:b"), terrarium.agents.map { it.sessionId }.toSet())
+    }
+
+    @Test
+    fun `a focused Codex session keeps its cloud when the list contains itself`() {
+        val self = SessionInfo(
+            id = "codex:primary", port = 9120, agentType = "codex-cli",
+            alive = true, state = "processing",
+        )
+        val terrarium = DashboardState(
+            agentState = AgentState.PROCESSING,
+            agentType = "codex-cli",
+            sessionId = self.id,
+            siblingSessions = listOf(self),
+        ).toTerrariumState()
+
+        assertEquals(1, terrarium.cloudCreatures.size)
+        assertEquals("codex:primary", terrarium.cloudCreatures.single().sessionId)
     }
 
     @Test

@@ -38,6 +38,38 @@ file's own rule forbids reconstructing its notes. The commit above is the
 record. `npm 1.0.16` (`37c674b8`) is a different case and needs nothing — it was
 bumped, superseded by 1.0.17, and never published, so it exists only in git.
 
+## 2026-08-31 — Android 1.0.12
+
+### A device is approved as itself, and a focused session gets its creature back
+
+The dashboard now names itself in the WebSocket handshake with a random
+per-install id, so the Mac can approve THIS device rather than the address it
+happens to hold. Approval by address was the only option available — the daemon
+accepts or refuses before any frame, long before a client says what it is — and
+behind NAT an address is shared, so approving one device approved everything
+behind it. Devices that predate the header keep working: the daemon falls back
+to address-scoped approval and labels which kind a grant is, because only one of
+them survives a DHCP lease change.
+
+### Creatures
+
+A focused session stopped rendering its creature. The predicate meant to detect
+an aggregate row — the daemon, or an OpenClaw session listing itself — asked
+whether any sibling shared the primary's agent type, and the sibling list
+contains the focused session itself, so it matched its own row and was true for
+every typed session. All four primary creature branches are gated on it, and the
+sibling loop skips the focused session by id, so the session you were looking at
+had no creature from either path: one session in view meant none at all.
+
+The tests that covered this passed by leaving the sibling list empty, a shape
+the daemon never sends. They now build the list the way the wire does.
+
+The same expression existed on two other surfaces and was narrowed with it. On
+the terminal dashboard it decided whether to add the focused session at all, so
+a second session of the same agent silently dropped its octopus. On macOS it
+only fed the environment mood of a disconnected primary, which is why nothing
+was visibly wrong there.
+
 ## 2026-08-31 — npm 1.2.0
 
 This is a backward-compatible minor release. It keeps protocol compatibility

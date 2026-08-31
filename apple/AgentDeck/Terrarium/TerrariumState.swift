@@ -469,8 +469,15 @@ extension DashboardState {
         result.kiroCreatures = kiroCreatures
 
         // Environment state — in daemon mode, derive from most active sibling
+        // Narrowed to the aggregate rows the comment above names. The previous
+        // form matched the focused session's own row — `siblingSessions`
+        // contains it — so it was true for every typed session. Here that only
+        // reached the environment mood on a disconnected primary (the creature
+        // lists on this surface do not consult it, unlike the Android one where
+        // the same expression suppressed every primary creature), but it is the
+        // same mistake and it read as intentional.
         let isDaemonLike = agentType == "daemon" ||
-            (agentType != nil && siblingSessions.contains(where: { $0.agentType == agentType }))
+            (agentType == "openclaw" && siblingSessions.contains(where: { $0.agentType == "openclaw" }))
         let effectiveState: AgentConnectionState
         if isDaemonLike && state == .disconnected {
             effectiveState = mostActiveSiblingState(siblingSessions) ?? .idle

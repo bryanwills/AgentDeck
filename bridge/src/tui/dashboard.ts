@@ -160,8 +160,15 @@ export async function startDashboard(opts: DashboardOptions): Promise<void> {
     const octSessions: Array<{ id?: string; state: string; name?: string; agentType?: string }> = state.sessions
       .map(s => ({ id: s.id, state: s.state || 'idle', name: s.projectName, agentType: s.agentType as string | undefined }));
 
+    // Narrow on purpose. The shorter form this replaces — "any session shares
+    // my agentType" — matches the focused session's OWN row whenever the list
+    // contains it, and in daemon mode it always does. In session-bridge mode
+    // the list holds siblings only, so a second session of the same agent made
+    // this true and the focused session was never prepended: its octopus
+    // vanished for no reason but having a namesake. `selfInList` below is what
+    // actually prevents a duplicate; this flag is only about aggregate rows.
     const isDaemonLikeRender = state.agentType === 'daemon' ||
-      (state.agentType && state.sessions.some(s => s.agentType === state.agentType));
+      (state.agentType === 'openclaw' && state.sessions.some(s => s.agentType === 'openclaw'));
     if (!isDaemonLikeRender && state.state && state.state !== 'disconnected') {
       // Session bridge mode: add self if not already present
       const selfInList = octSessions.some(s => s.name === state.projectName && s.agentType === (state.agentType ?? undefined));
