@@ -4,7 +4,7 @@ import type { BridgeEvent, PluginCommand } from './types.js';
 import { isLocalConnection, validateToken } from './auth.js';
 import { mayAdoptEsp32, noteEsp32Adopted } from './pairing-window.js';
 import { debug, log } from './logger.js';
-import { WS_PING_INTERVAL_MS } from '@agentdeck/shared';
+import { DEVICE_ID_HEADER, normalizeDeviceId, WS_PING_INTERVAL_MS } from '@agentdeck/shared';
 
 export class WsServer {
   private wss: WebSocketServer;
@@ -41,6 +41,19 @@ export class WsServer {
    */
   private esp32AdoptionProvider:
     | (() => { authToken: string; bridgeIp: string; bridgePort: number } | null)
+    | null = null;
+  /**
+   * The operator-approval half of the credential path, or null when this server
+   * must not consult it. Injected for the same reason as the provider above: a
+   * session bridge shares this class, and an approval roster is the daemon's to
+   * own — a bridge answering "is this peer approved?" would be a second, unowned
+   * copy of the decision.
+   */
+  private pairingApproval:
+    | {
+      isApproved: (ip: string, deviceId: string | null) => boolean;
+      record: (ip: string, deviceId: string | null, staleToken: boolean) => void;
+    }
     | null = null;
   private socketRemoteIp = new Map<WebSocket, string>();
   private eventTransformer: ((event: BridgeEvent, client: WebSocket) => BridgeEvent | null) | null = null;
@@ -89,7 +102,21 @@ export class WsServer {
       if (!isLocalConnection(remoteIp)) {
         const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
         const token = url.searchParams.get('token') || '';
-        if (!validateToken(token)) {
+        // The id a client offers on the handshake, if it offers one. Read here
+        // rather than from a later frame because the decision happens now:
+        // `client_register` arrives only after a socket exists, which is after
+        // this branch has already accepted or refused.
+        const rawDeviceId = req.headers[DEVICE_ID_HEADER];
+        const deviceId = normalizeDeviceId(
+          Array.isArray(rawDeviceId) ? rawDeviceId[0] : rawDeviceId,
+        );
+        // An operator-approved peer authenticates without a token. This is the
+        // credential path for a device that can neither scan a QR nor be
+        // reached over USB — the approval was granted on the host, against the
+        // peer's key, by someone who could see the knock.
+        if (!validateToken(token) && this.pairingApproval?.isApproved(remoteIp, deviceId)) {
+          debug('WS', `Operator-approved peer at ${remoteIp} admitted without a token`);
+        } else if (!validateToken(token)) {
           // Whatever the peer called itself, bounded and sanitized: it is a
           // string from an unauthenticated peer heading for a terminal.
           const claimed = url.searchParams.get('clientType')
@@ -165,6 +192,14 @@ export class WsServer {
             }
           }
 
+          // Turn the refusal into something an operator can act on. A peer that
+          // presented a token we do not accept is recorded as such: that reads
+          // very differently to a new device — usually a provisioned one whose
+          // credential went stale.
+          // Deliberately OUTSIDE `logUnauthorized`'s per-IP 60 s throttle: that
+          // throttle exists so a looping device does not flood a terminal, but
+          // this counts the attempts the operator is shown.
+          this.pairingApproval?.record(remoteIp, deviceId, token.length > 0);
           this.logUnauthorized(remoteIp, token.length > 0, peerKind, board);
           ws.close(4001, 'Unauthorized');
           return;
@@ -370,6 +405,21 @@ export class WsServer {
     provider: (() => { authToken: string; bridgeIp: string; bridgePort: number } | null) | null,
   ): void {
     this.esp32AdoptionProvider = provider;
+  }
+
+  /**
+   * Enable operator-approval authentication on this server (daemon only).
+   *
+   * With no hooks the server behaves exactly as before: a peer authenticates by
+   * token or not at all, and a refusal is only logged.
+   */
+  setPairingApprovalHooks(
+    hooks: {
+      isApproved: (ip: string, deviceId: string | null) => boolean;
+      record: (ip: string, deviceId: string | null, staleToken: boolean) => void;
+    } | null,
+  ): void {
+    this.pairingApproval = hooks;
   }
 
   onClientConnect(callback: (ws: WebSocket) => void): void {

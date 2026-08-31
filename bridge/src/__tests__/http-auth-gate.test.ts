@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Hermetic auth: local-ness and token validity are inputs here, not the real
 // ~/.agentdeck/auth-token file.
@@ -12,11 +12,25 @@ vi.mock('../auth.js', () => ({
 }));
 
 import { buildPublicHealth, gateHttpRequest, isAuthorizedHttpRequest } from '../http-auth-gate.js';
+import {
+  approvePeer,
+  peerKey,
+  resetPairingKnocksForTests,
+  revokePeer,
+} from '../pairing-knocks.js';
 
-function fakeReq(over: { url?: string; remoteAddress?: string; authorization?: string }) {
+function fakeReq(over: {
+  url?: string;
+  remoteAddress?: string;
+  authorization?: string;
+  deviceId?: string;
+}) {
+  const headers: Record<string, string> = {};
+  if (over.authorization) headers.authorization = over.authorization;
+  if (over.deviceId) headers['x-agentdeck-device'] = over.deviceId;
   return {
     url: over.url ?? '/',
-    headers: over.authorization ? { authorization: over.authorization } : {},
+    headers,
     socket: { remoteAddress: over.remoteAddress ?? '192.0.2.55' },
   };
 }
@@ -47,6 +61,10 @@ describe('gateHttpRequest (issue #145 LAN default-deny)', () => {
       // The operator side of pairing is same-machine only: a remote peer that
       // could open its own window would be granting itself a credential.
       ['POST', '/pair/open'], ['GET', '/pair/status'], ['POST', '/pair/close'],
+      // Same reason for the approval half: a peer that could approve itself
+      // would be granting itself a credential.
+      ['GET', '/pair/knocks'], ['POST', '/pair/approve'],
+      ['POST', '/pair/revoke'], ['POST', '/pair/dismiss'],
     ] as const;
     for (const [method, path] of sensitive) {
       expect(gateHttpRequest(method, path, false), `${method} ${path}`).toBe('deny');
@@ -125,5 +143,70 @@ describe('isAuthorizedHttpRequest', () => {
     expect(isAuthorizedHttpRequest(fakeReq({ url: '/status?token=wrong' }))).toBe(false);
     expect(isAuthorizedHttpRequest(fakeReq({ authorization: 'Bearer wrong' }))).toBe(false);
     expect(isAuthorizedHttpRequest(fakeReq({ authorization: 'Basic machine-token' }))).toBe(false);
+  });
+});
+
+// The third way a peer is authorized, beside same-machine and a token: the
+// operator approved it. Folded into `isAuthorizedHttpRequest` rather than added
+// as a `gateHttpRequest` parameter, so the truth table above stays pure.
+describe('operator approval authorizes an HTTP request', () => {
+  const DEV = 'c'.repeat(32);
+  const IP = '192.0.2.77';
+  let dir: string;
+
+  beforeEach(async () => {
+    const { mkdtempSync } = await import('fs');
+    const { tmpdir } = await import('os');
+    const { join } = await import('path');
+    dir = mkdtempSync(join(tmpdir(), 'agentdeck-gate-'));
+    process.env.AGENTDECK_DATA_DIR = dir;
+    resetPairingKnocksForTests();
+  });
+
+  afterEach(async () => {
+    const { rmSync } = await import('fs');
+    delete process.env.AGENTDECK_DATA_DIR;
+    resetPairingKnocksForTests();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('refuses an unapproved remote peer', () => {
+    expect(isAuthorizedHttpRequest(fakeReq({ remoteAddress: IP }))).toBe(false);
+  });
+
+  it('admits it once the operator approves its address', () => {
+    approvePeer(peerKey(IP, null));
+    expect(isAuthorizedHttpRequest(fakeReq({ remoteAddress: IP }))).toBe(true);
+  });
+
+  it('admits a device-approved peer from a DIFFERENT address', () => {
+    // The whole point of keying on a device: a DHCP lease change must not
+    // retire the grant.
+    approvePeer(peerKey(IP, DEV));
+    expect(isAuthorizedHttpRequest(
+      fakeReq({ remoteAddress: '192.0.2.99', deviceId: DEV }),
+    )).toBe(true);
+  });
+
+  it('does not admit a different device sharing an approved device grant', () => {
+    approvePeer(peerKey(IP, DEV));
+    expect(isAuthorizedHttpRequest(
+      fakeReq({ remoteAddress: IP, deviceId: 'd'.repeat(32) }),
+    )).toBe(false);
+  });
+
+  it('still admits a header-less client approved by address', () => {
+    // Every device in the field predates the header; refusing them would turn
+    // an upgrade into a fleet-wide outage.
+    approvePeer(peerKey(IP, null));
+    expect(isAuthorizedHttpRequest(fakeReq({ remoteAddress: IP }))).toBe(true);
+  });
+
+  it('stops admitting once revoked', () => {
+    approvePeer(peerKey(IP, DEV));
+    revokePeer(peerKey(IP, DEV));
+    expect(isAuthorizedHttpRequest(
+      fakeReq({ remoteAddress: IP, deviceId: DEV }),
+    )).toBe(false);
   });
 });

@@ -27,7 +27,9 @@
  * one piece of state the gate needs — is a window open — is passed in.
  */
 import type { IncomingMessage } from 'http';
+import { DEVICE_ID_HEADER } from '@agentdeck/shared';
 import { isLocalConnection, validateToken } from './auth.js';
+import { deviceIdFromHeaders, isApprovedPeer } from './pairing-knocks.js';
 
 export type HttpGateDecision = 'allow' | 'public-health' | 'pair-redeem' | 'deny';
 
@@ -50,7 +52,14 @@ export function isAuthorizedHttpRequest(
   if (typeof auth === 'string' && auth.startsWith('Bearer ') && validateToken(auth.slice(7))) {
     return true;
   }
-  return false;
+
+  // An operator-approved peer is authenticated; it simply carries its
+  // credential as a device id (or, for a client too old to send one, as its
+  // address) rather than as a token. Folded in here rather than passed to
+  // `gateHttpRequest` as a third parameter so that function stays the pure
+  // truth table its test drives — "authorized" is one input, however the peer
+  // earned it. Mirrors DaemonServer.httpAccessResponse on the Swift side.
+  return isApprovedPeer(ip, deviceIdFromHeaders(req.headers, DEVICE_ID_HEADER));
 }
 
 /** The redemption route. Only a route while an operator window is open. */

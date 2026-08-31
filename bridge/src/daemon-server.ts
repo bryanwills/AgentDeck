@@ -153,6 +153,15 @@ import {
   pairingWindowOpen,
   redeemPairingCode,
 } from './pairing-window.js';
+import {
+  approvePeer,
+  dismissKnock,
+  isApprovedPeer,
+  pairingApprovals,
+  pairingKnocks,
+  recordKnock,
+  revokePeer,
+} from './pairing-knocks.js';
 import { getLastFrame, renderPreviewFrame, onFrameRendered, offFrameRendered } from './pixoo/pixoo-bridge.js';
 import { loadIDotMatrixDevices } from './idotmatrix/idotmatrix-settings.js';
 import { handlePixooWake } from './pixoo/pixoo-client.js';
@@ -1888,6 +1897,76 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       closePairingWindow();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ open: false }));
+      return;
+    }
+    // The operator-approval half of the credential path. A code asks the DEVICE
+    // to prove something; these ask the OPERATOR, and only the second one a
+    // camera-less reader can complete. Like the window routes above they sit
+    // BEHIND the normal auth gate — a remote peer able to approve itself would
+    // be granting itself a credential.
+    //
+    // GET  /pair/knocks             → { knocks, approvals }
+    // POST /pair/approve  { key }   → { approved: true }
+    // POST /pair/revoke   { key }   → { revoked: bool }
+    // POST /pair/dismiss  { key }   → { dismissed: bool }
+    // The wire shape is the Swift daemon's, field for field: the Mac app in
+    // CLIENT mode calls these routes against whichever daemon holds 9120, so a
+    // shape of our own would break its approval UI on exactly the machines that
+    // run both. `deviceId` is "" rather than null when a row is address-scoped
+    // (the client maps "" back to nil), and every timestamp is epoch ms.
+    if (req.method === 'GET' && pathname === '/pair/knocks') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({
+        knocks: pairingKnocks().map((k) => ({
+          key: k.key,
+          ip: k.ip,
+          deviceId: k.deviceId ?? '',
+          attempts: k.attempts,
+          firstSeen: k.firstSeen,
+          lastSeen: k.lastSeen,
+          staleToken: k.staleToken,
+        })),
+        approved: pairingApprovals().map((a) => ({
+          key: a.key,
+          deviceId: a.deviceId ?? '',
+          lastIP: a.lastIP,
+          approvedAt: a.approvedAt,
+        })),
+      }));
+      return;
+    }
+    if (req.method === 'POST' && (pathname === '/pair/approve'
+      || pathname === '/pair/revoke' || pathname === '/pair/dismiss')) {
+      void (async () => {
+        let body: Record<string, unknown> = {};
+        try { body = await readJsonBody(req, 4096); } catch { /* defaults */ }
+        const key = typeof body.key === 'string' ? body.key : '';
+        if (!key) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'key required' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        if (pathname === '/pair/approve') {
+          approvePeer(key);
+          log(`[agentdeck] Operator approved peer ${key}`);
+          res.end(JSON.stringify({ approved: key }));
+        } else if (pathname === '/pair/revoke') {
+          revokePeer(key);
+          log(`[agentdeck] Operator revoked peer ${key}`);
+          res.end(JSON.stringify({ revoked: key }));
+        } else {
+          // Dismiss is silent, as in Swift — it is not an operator decision
+          // about trust, just a row cleared off a list.
+          dismissKnock(key);
+          res.end(JSON.stringify({ dismissed: key }));
+        }
+      })().catch(() => {
+        try {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'could not update approvals' }));
+        } catch { /* client gone */ }
+      });
       return;
     }
     if (req.method === 'GET' && pathname === '/status') {
@@ -4113,6 +4192,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     bridgeIp: getLanIp(),
     bridgePort: port,
   }));
+
+  // Operator-approval authentication (daemon only, for the same reason). The
+  // roster belongs to the process that serves the operator's approval routes;
+  // a session bridge sharing WsServer must not answer "is this peer approved?"
+  // from a second, unowned copy of it.
+  core.wsServer.setPairingApprovalHooks({
+    isApproved: (ip, deviceId) => isApprovedPeer(ip, deviceId),
+    record: (ip, deviceId, staleToken) => recordKnock(ip, deviceId, staleToken),
+  });
 
   // WS-path display_state re-sync: the 5s serial heartbeat above only covers
   // USB-attached boards. WiFi boards (InkDeck) receive display_state edge-
