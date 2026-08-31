@@ -1825,4 +1825,49 @@ final class TimelineDayBreakTests: XCTestCase {
         XCTAssertNil(timelineDayBreakLabel(at: -1, in: grouped, now: now, calendar: seoul))
         XCTAssertNil(timelineDayBreakLabel(at: 1, in: grouped, now: now, calendar: seoul))
     }
+
+    // MARK: - Wire stamps are integers
+
+    /// Epoch-ms stamps are held internally as `Double`, and serializing one
+    /// straight out put `1788215929418.106` on the wire. The cost is not local
+    /// to the field: a strict client decodes a frame as a unit, so ONE
+    /// fractional stamp inside a subagent census discarded the entire
+    /// `sessions_list` on every Android device — roster, header count and
+    /// creatures — logged only as a truncated "Unparsed WS message"
+    /// (measured 2026-09-01, 242 consecutive frames).
+    ///
+    /// Asserted against the serialized JSON rather than the Swift value,
+    /// because `1788215929418.0` is a perfectly equal Double and the whole
+    /// question is what lands on the wire.
+    func testTimelineWireStampsSerializeAsIntegers() throws {
+        let entries = [
+            DaemonTimelineEntry(
+                ts: 1_788_215_929_418.106,
+                type: "task_end",
+                raw: "done",
+                startedAt: 1_788_215_890_971.3188,
+                endedAt: 1_788_215_919_634.75
+            ),
+        ]
+        let payload = DaemonServer.buildTimelineHistoryEventForTest(from: entries)
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let json = String(data: data, encoding: .utf8)!
+
+        XCTAssertFalse(json.contains("1788215929418.1"), "ts leaked a fraction: \(json)")
+        XCTAssertTrue(json.contains("1788215929418"), "ts missing: \(json)")
+        XCTAssertFalse(json.contains("1788215890971.3"), "startedAt leaked a fraction: \(json)")
+        XCTAssertFalse(json.contains("1788215919634.7"), "endedAt leaked a fraction: \(json)")
+    }
+
+    /// The conversion is guarded because `Int(Double)` TRAPS on NaN and
+    /// infinity — a daemon that crashes on a malformed stamp is worse than one
+    /// that emits a wrong-but-finite number.
+    func testWireEpochMsRefusesNonFiniteInsteadOfTrapping() {
+        XCTAssertEqual(DaemonServer.wireEpochMs(.nan), 0)
+        XCTAssertEqual(DaemonServer.wireEpochMs(.infinity), 0)
+        XCTAssertEqual(DaemonServer.wireEpochMs(-.infinity), 0)
+        XCTAssertEqual(DaemonServer.wireEpochMs(1_788_215_929_418.6), 1_788_215_929_419)
+        XCTAssertEqual(DaemonServer.wireEpochMs(0), 0)
+    }
+
 }

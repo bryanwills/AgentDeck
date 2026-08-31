@@ -4961,7 +4961,7 @@ final class DaemonServer {
             "peak": census.peak,
             "completed": census.completed,
         ]
-        if let last = census.lastCompletedAt { out["lastCompletedAt"] = last }
+        if let last = census.lastCompletedAt { out["lastCompletedAt"] = Self.wireEpochMs(last) }
         return out
     }
 
@@ -11203,9 +11203,33 @@ final class DaemonServer {
         ]
     }
 
+    /// Epoch-ms on the wire is an INTEGER, always.
+    ///
+    /// These stamps are held internally as `Double` (`Date().timeIntervalSince1970
+    /// * 1000`), and serializing one straight out puts `1788215929418.106` on the
+    /// wire. A strict client refuses that for an integer field, and the refusal is
+    /// not local to the field: Android decodes the whole frame at once, so one
+    /// fractional stamp inside a session's subagent census discarded the entire
+    /// `sessions_list` — session roster, header count and every creature — with
+    /// nothing in the log but a truncated "Unparsed WS message" (measured
+    /// 2026-09-01, 242 consecutive frames). The Kotlin timeline fields survived
+    /// only because they carry a lenient serializer added when this bit once
+    /// before. Fixing it at the producer is what stops the next client from
+    /// having to know.
+    ///
+    /// Guarded rather than a bare `Int(...)`: that conversion TRAPS on NaN or
+    /// infinity, and a daemon that crashes on a malformed stamp is worse than one
+    /// that emits a wrong-but-finite number.
+    nonisolated static func wireEpochMs(_ value: Double) -> Int {
+        guard value.isFinite else { return 0 }
+        let rounded = value.rounded()
+        guard rounded >= Double(Int.min), rounded <= Double(Int.max) else { return 0 }
+        return Int(rounded)
+    }
+
     private nonisolated static func daemonTimelineEntryDict(_ e: DaemonTimelineEntry) -> [String: Any] {
         var dict: [String: Any] = [
-            "ts": e.ts,
+            "ts": wireEpochMs(e.ts),
             "type": e.type,
             "raw": e.raw,
         ]
@@ -11223,8 +11247,8 @@ final class DaemonServer {
         if let v = e.automated { dict["automated"] = v }
         if let v = e.sessionId { dict["sessionId"] = v }
         if let v = e.projectName { dict["projectName"] = v }
-        if let v = e.startedAt { dict["startedAt"] = v }
-        if let v = e.endedAt { dict["endedAt"] = v }
+        if let v = e.startedAt { dict["startedAt"] = wireEpochMs(v) }
+        if let v = e.endedAt { dict["endedAt"] = wireEpochMs(v) }
         if let v = e.runId { dict["runId"] = v }
         // Without this, the daemon writes summaryKind into timeline.json
         // (Codable round-trip) but dashboards see nil over the live WS feed —
