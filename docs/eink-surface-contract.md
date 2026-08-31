@@ -116,7 +116,8 @@ E-ink firmware that owns the panel SHOULD emit two optional `device_info`
 counters, both monotonic since boot:
 
 - `repaintCount`: actual physical panel refreshes after content and rate gates;
-- `fullRefreshCount`: the full-window subset of `repaintCount`.
+- `fullRefreshCount`: the hard anti-ghost/full-waveform subset of `repaintCount`
+  (EPD47 differential frame replacements do not increment it).
 
 The counters reset on reboot and may be absent on older or non-e-ink firmware.
 Both daemons expose them over serial and WiFi so a redesign can be evaluated

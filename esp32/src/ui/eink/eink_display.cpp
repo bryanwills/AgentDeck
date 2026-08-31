@@ -51,6 +51,7 @@ void epd_draw_image(LilyEpdRect area, uint8_t* data, int mode);
 #include "ui/agent_label.h"
 #include "ui/eink/eink_dashboard_layout.h"
 #include "ui/eink/epd47_page_policy.h"
+#include "ui/eink/epd47_refresh_policy.h"
 #include "util/usage_format.h"
 #include "util/utf8.h"
 #include "util/memory.h"
@@ -119,9 +120,10 @@ constexpr uint32_t MIN_REFRESH_INTERVAL_MS = 60000;
 constexpr uint32_t MIN_REFRESH_INTERVAL_MS = 3000;
 #endif
 #if defined(BOARD_LILYGO_EPD47)
-// The parallel grayscale driver has no previous-frame differential RAM API,
-// so a "full" cycle means an explicit white epd_clear() before drawing. Keep
-// routine image writes quiet, then clear periodically to bound ghosting.
+// The parallel grayscale driver assumes a white surface before every image
+// write. AgentDeck retains the previous 4-bit frame in PSRAM and drives that
+// ink back to paper before each replacement, then runs a hard anti-ghost sweep
+// after four differential erases or ten minutes.
 constexpr uint8_t  FULL_EVERY_N_PARTIALS   = 4;
 constexpr uint32_t FULL_MAX_AGE_MS         = 10UL * 60UL * 1000UL;
 #else
@@ -1252,10 +1254,11 @@ PaperFace renderFace = PaperFace::Glance;
 PaperFace manualFace = PaperFace::Glance;
 #if defined(AGENTDECK_EPD47_UI)
 AgentDeckEpd47::Page epd47Page = AgentDeckEpd47::Page::Limits;
-// Hysteresis for the autonomous tab. A page swap costs a full-panel clear, so
-// it must be rarer than a repaint — settle at two repaint windows, which
-// guarantees the panel actually shows a page's content before it can change
-// again. See AgentDeckEpd47::arbitratePage for the measurement behind this.
+// Hysteresis for the autonomous tab. A page swap costs a retained-frame erase
+// plus a complete draw, so it must be rarer than a repaint — settle at two
+// repaint windows, which guarantees the panel actually shows a page's content
+// before it can change again. See AgentDeckEpd47::arbitratePage for the
+// measurement behind this.
 constexpr uint32_t EPD47_PAGE_SETTLE_MS = 2UL * MIN_REFRESH_INTERVAL_MS;
 AgentDeckEpd47::PageArbiter epd47Arbiter;
 uint32_t epd47PageHoldUntilMs = 0;
@@ -2193,11 +2196,15 @@ void drawDashboard(const Snap& s) {
 
 uint32_t lastHash = 0;
 uint32_t lastDrawMs = 0;
+#if defined(BOARD_LILYGO_EPD47)
+AgentDeckEpd47::RefreshState epd47RefreshState;
+#else
 uint32_t lastFullMs = 0;
 uint8_t partialCount = 0;
+#endif
 bool firstDraw = true;
 bool forceFull = false;
-bool forceRefresh = false;  // immediate image write without an extra white clear
+bool forceRefresh = false;  // immediate repaint without forcing a hard clear
 bool wasSearching = true;
 char lastTickerShown[104] = "";
 uint32_t repaintCountValue = 0;
@@ -2205,65 +2212,44 @@ uint32_t fullRefreshCountValue = 0;
 bool key1Prev = true, key2Prev = true;
 uint32_t keyLastMs = 0;
 
-// How a changed EPD47 frame gets the previous ink off the glass. Decided once
-// by the caller: deriving it again here from partialCount/lastFullMs would be
-// the same predicate in two places, and those drift.
-enum class Erase : uint8_t {
-    None = 0,      // partial image write, nothing to take off
-    Differential,  // drive the retained previous frame back to paper
-    ClearBody,     // hard anti-ghost sweep, header provably unchanged
-    ClearAll,      // hard anti-ghost sweep of the whole panel
-};
-
 void refresh(void (*draw)(const Snap&), const Snap& s, bool full,
-             Erase erase = Erase::ClearAll) {
+             AgentDeckEpd47::Erase erase = AgentDeckEpd47::Erase::ClearAll) {
     // Count at the one choke point that performs physical panel I/O, not at
     // render requests (most of which content-hash/rate gates intentionally
     // discard). Relaxed atomics keep device_info reads race-free across the
     // network and UI tasks without putting a lock around a multi-second draw.
     __atomic_add_fetch(&repaintCountValue, 1u, __ATOMIC_RELAXED);
-    if (full) __atomic_add_fetch(&fullRefreshCountValue, 1u, __ATOMIC_RELAXED);
 #if defined(BOARD_LILYGO_EPD47)
+    // If the optional retained frame allocation failed, degrade every update
+    // to the safe hard-clear path. Record the mode that physically ran, not the
+    // requested one, so the anti-ghost schedule and telemetry stay truthful.
+    const AgentDeckEpd47::Erase mode = display.prev()
+        ? erase : AgentDeckEpd47::Erase::ClearAll;
+    const bool hardClear = AgentDeckEpd47::isHardClear(mode);
+    if (hardClear)
+        __atomic_add_fetch(&fullRefreshCountValue, 1u, __ATOMIC_RELAXED);
     display.fillScreen(GxEPD_WHITE);
     draw(s);
     epd_poweron();
     const LilyEpdRect fullArea{0, 0, SCREEN_W, SCREEN_H};
-    if (full) {
-        // epd_draw_grayscale_image() alone does not erase the prior physical
-        // image, so a changed frame needs the old ink taken off first — and the
-        // two ways of doing that are not equally loud. A periodic anti-ghosting
-        // sweep genuinely wants the hard waveform; it exists to reset pigment
-        // that differential passes leave behind. A content change does not:
-        // driving the RETAINED previous frame back to paper erases exactly the
-        // pixels carrying ink and leaves the rest of the panel alone.
-        // epd_clear() instead runs several whole-panel inversions, which is why
-        // one tab tap read as a storm of flashes.
-        const Erase mode = display.prev() ? erase : Erase::ClearAll;
-        switch (mode) {
-            case Erase::Differential:
-                epd_draw_image(fullArea, display.prev(), 1 << 1);  // WHITE_ON_WHITE
-                break;
-            case Erase::ClearBody: {
-                const LilyEpdRect body{0, EPD47_HEADER_H, SCREEN_W,
-                                       SCREEN_H - EPD47_HEADER_H};
-                epd_clear_area(body);
-                display.forgetFrame();
-                break;
-            }
-            default:
-                epd_clear();
-                display.forgetFrame();
-                break;
-        }
-        partialCount = 0;
-        lastFullMs = millis();
-    } else {
-        partialCount++;
+    // epd_draw_grayscale_image() does not erase prior ink and explicitly
+    // requires a white surface. Therefore EVERY replacement first removes the
+    // retained frame. Only the scheduled anti-ghost modes use a hard waveform.
+    switch (mode) {
+        case AgentDeckEpd47::Erase::Differential:
+            epd_draw_image(fullArea, display.prev(), 1 << 1);  // WHITE_ON_WHITE
+            break;
+        default:
+            epd_clear();
+            display.forgetFrame();
+            break;
     }
     epd_draw_grayscale_image(fullArea, display.pixels());
     display.retainFrame();
+    AgentDeckEpd47::recordErase(epd47RefreshState, mode, millis());
     epd_poweroff();
 #else
+    if (full) __atomic_add_fetch(&fullRefreshCountValue, 1u, __ATOMIC_RELAXED);
 #if defined(BOARD_NM_EPD_420)
     // hasPartialUpdate on this driver means partial RAM addressing, not a safe
     // physical partial waveform for the installed tri-color glass. Never call
@@ -2597,9 +2583,8 @@ void update(float /*dt*/) {
         }
 
         if (handled) {
-            // EPD47's direct image write does not erase the previous physical
-            // page. Every tab/decision transition must clear once or old tab
-            // underlines and text remain visibly selected underneath it.
+            // Bypass the coalesce gate. The refresh policy will differentially
+            // erase the prior frame unless a scheduled hard clear is due.
             forceFull = true;
             lastHash = 0;
         }
@@ -2636,11 +2621,10 @@ void render() {
         if (change != AgentDeckEpd47::PageChange::None) {
             epd47Page = epd47Arbiter.current;
             // paperHash() mixes epd47Page on GLANCE, so a settled swap is picked
-            // up by the next scheduled repaint and still clears (the `full`
-            // decision below compares against lastPhysicalEpd47Page). Only
-            // attention earns forceFull, which also bypasses the coalesce window
-            // — granting that to every swap is what turned a jittery count into
-            // a blink every few seconds.
+            // up by the next scheduled repaint and still erases the retained
+            // prior frame. Only attention earns forceFull, which also bypasses
+            // the coalesce window — granting that to every swap is what turned
+            // a jittery count into a refresh every few seconds.
             if (change == AgentDeckEpd47::PageChange::Urgent) forceFull = true;
         }
     }
@@ -2710,11 +2694,25 @@ void render() {
     if (!forceFull && !forceRefresh && !urgentTransition &&
         (now - lastDrawMs) < MIN_REFRESH_INTERVAL_MS) return;  // coalesce bursts
 
+#if defined(BOARD_LILYGO_EPD47)
+    // A logical page transition is not a pigment reset. It gets the same quiet
+    // differential erase as every other content replacement, and crucially it
+    // does not reset the hard-clear count or age.
+    const bool epd47HardClear = AgentDeckEpd47::hardClearDue(
+        epd47RefreshState, firstDraw, now, FULL_EVERY_N_PARTIALS,
+        FULL_MAX_AGE_MS);
+    const AgentDeckEpd47::Erase epd47Erase =
+        AgentDeckEpd47::chooseErase(epd47HardClear);
+    refresh(searching ? drawSearching : drawDashboard, s,
+            epd47HardClear, epd47Erase);
+#else
     bool full = forceFull || firstDraw ||
                 partialCount >= FULL_EVERY_N_PARTIALS ||
                 (now - lastFullMs) > FULL_MAX_AGE_MS ||
                 (searching != wasSearching);
 #if defined(AGENTDECK_EPD47_UI)
+    // Host preview: mirror the visible page-replacement behavior even though it
+    // has no physical waveform or retained-panel state.
     full = full || !physicalEpd47PageReady || epd47Page != lastPhysicalEpd47Page;
 #endif
 #if defined(BOARD_NM_EPD_420)
@@ -2725,27 +2723,6 @@ void render() {
     // Keep transport-offline distinct from a live daemon with an empty roster.
     // init() already uses this split; subsequent refreshes must preserve it or
     // the first timed repaint replaces OFFLINE with "no active sessions".
-#if defined(BOARD_LILYGO_EPD47)
-    // The header carries the wordmark, the tab strip and the link label. The
-    // tab underline moves only on a page change and the label only on a link
-    // transition — and BOTH of those already force `full` through a different
-    // branch, so when neither moved the header on the glass is the header we
-    // are about to draw.
-    const bool epd47HeaderStable = !firstDraw && physicalEpd47PageReady &&
-                                   epd47Page == lastPhysicalEpd47Page &&
-                                   searching == wasSearching;
-    // Is this `full` the scheduled pigment reset, or just changed content? Only
-    // the former earns the hard waveform. Read the same counters the `full`
-    // decision above read, before refresh() resets them.
-    const bool epd47AntiGhost = firstDraw ||
-                                partialCount >= FULL_EVERY_N_PARTIALS ||
-                                (uint32_t)(now - lastFullMs) > FULL_MAX_AGE_MS;
-    const Erase epd47Erase =
-        !full ? Erase::None
-              : (epd47AntiGhost ? (epd47HeaderStable ? Erase::ClearBody : Erase::ClearAll)
-                                : Erase::Differential);
-    refresh(searching ? drawSearching : drawDashboard, s, full, epd47Erase);
-#else
     refresh(searching ? drawSearching : drawDashboard, s, full);
 #endif
 

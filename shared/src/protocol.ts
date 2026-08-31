@@ -706,7 +706,7 @@ export interface DeviceInfoMessage {
   otaReason?: string;
   /** Actual physical panel refreshes since boot; absent on non-e-ink/legacy firmware. */
   repaintCount?: number;
-  /** Full-window refresh subset of repaintCount since boot. */
+  /** Hard anti-ghost/full-waveform subset of repaintCount since boot. */
   fullRefreshCount?: number;
   /**
    * Peripheral capability advertisement (docs/esp32-companion-concepts.md

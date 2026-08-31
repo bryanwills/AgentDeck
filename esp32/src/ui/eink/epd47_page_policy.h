@@ -15,9 +15,9 @@ inline Page automaticPage(uint8_t attentionCount, uint8_t processingCount) {
     return active == 1 ? Page::Focus : Page::Queue;
 }
 
-// A page change costs a full-panel erase on this driver — the parallel grayscale
-// backend has no previous-frame differential RAM, so switching pages means
-// epd_clear() before the image write, and that clear IS the visible blink.
+// A page change costs a retained-frame erase plus a complete image write on this
+// driver. It no longer spends a hard epd_clear(), but is still a much slower and
+// more visible operation than changing an LCD framebuffer.
 //
 // automaticPage() alone reads a count that oscillates continuously on a busy
 // machine: one session moving between processing and idle flips the answer
