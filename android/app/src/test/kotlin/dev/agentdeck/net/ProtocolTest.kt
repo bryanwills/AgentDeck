@@ -341,4 +341,19 @@ class ProtocolTest {
         assertEquals(1, event.encoders.size)
         assertEquals("utility", event.encoders[0].actionType)
     }
+
+    // Captured verbatim off a live Swift daemon on 2026-09-01, not composed
+    // from what the decoder expects: a fixture built from the reader's own
+    // field list agrees with it forever and cannot catch a producer that
+    // emits a shape the reader refuses. Every Android device on this fleet
+    // was logging "Unparsed WS message" for exactly this frame.
+    private val liveSwiftDaemonSessionsFrame = "{\"sessions\":[{\"alive\":true,\"agentType\":\"openclaw\",\"projectName\":\"OpenClaw\",\"modelName\":\"zai\\/glm-5.2\",\"port\":18789,\"id\":\"openclaw-gateway\",\"state\":\"idle\",\"startedAt\":\"2026-08-31T16:07:39Z\"},{\"agentType\":\"claude-code\",\"liveAnswerable\":false,\"startedAt\":\"2026-08-31T22:12:15Z\",\"projectName\":\"AgentDeck\",\"state\":\"processing\",\"port\":9120,\"alive\":true,\"currentTool\":\"Bash\",\"lastEventHm\":\"07:21\",\"activity\":\"Building the AgentDeck CLI\",\"elapsedSec\":720,\"controlMode\":\"observed\",\"id\":\"adfef38f-28c8-4636-938b-5a62efa40822\",\"lastEventText\":\"cremas 연결했다.\",\"lastEventTask\":\"Task 1\"},{\"controlMode\":\"observed\",\"startedAt\":\"2026-08-31T22:12:27Z\",\"id\":\"6648f5ce-e0db-4245-a9c4-5c949b94cd41\",\"lastEventText\":\"조사 세션이 **내 요건 자체를 무너뜨렸고, 그게 맞았다.**\\n\\n## 코드가 답을 줬다\\n\\n```gdscript\\nfunc _person_era_arrived(person: NpcPerson) -> bool:\\n    return era_index != -1 and era_index <= current_era_index\\n```\\n\\n`appear_era_id`는 *\",\"liveAnswerable\":false,\"state\":\"idle\",\"elapsedSec\":708,\"lastEventHm\":\"07:14\",\"projectName\":\"epoch-of-tech\",\"agentType\":\"claude-code\",\"subagents\":{\"completed\":1,\"lastCompletedAt\":1788214664925.6821,\"active\":0,\"peak\":0},\"port\":9120,\"alive\":true},{\"liveAnswerable\":false,\"controlMode\":\"observed\",\"startedAt\":\"2026-08-31T22:12:27Z\",\"lastEventHm\":\"07:15\",\"state\":\"idle\",\"subagents\":{\"peak\":3,\"completed\":46,\"active\":3,\"lastCompletedAt\":1788215053018.342},\"agentType\":\"claude-code\",\"lastEventText\":\"## b69 조사 착수 — 에이전트 3개 투입\\n\\n**확정된 것들**:\\n- 21인 목록 그대로 승인 (스팍존스·DESIGN\\/MEDIA 엔지니어 0·b67 원장 연결 호평)\\n- 계약 오류 3건이 저의 착수 전 질문으로 잡혀 피어가 수정: `living` 쿼터 폐지(은퇴≠생존, 생존 인물은 공개 직업 사실만), `country`=경력 주 국가+`birth_cou\",\"port\":9120,\"elapsedSec\":708,\"projectName\":\"epoch-of-tech\",\"id\":\"add58e3f-96bc-4f3a-82c1-88e04e9d0184\",\"alive\":true},{\"liveAnswerable\":false,\"port\":9120,\"id\":\"codex:01a05883-fd4e-7de3-8354-4185c696684a\",\"projectName\":\"epoch-of-tech\",\"lastEventText\":\"Interrupted · 1m 36s · 실제 게임 플레이가 스토리를 만들어낼 수 있는지 검증한다.\",\"lastEventHm\":\"00:54\",\"startedAt\":\"2026-08-31T22:12:19Z\",\"alive\":true,\"state\":\"processing\",\"agentType\":\"codex-cli\",\"controlMode\":\"observed\",\"elapsedSec\":716},{\"state\":\"processing\",\"elapsedSec\":700,\"agentType\":\"codex-cli\",\"id\":\"codex:01a05885-c5e3-7ce0-9c45-06ec2f04a6fd\",\"startedAt\":\"2026-08-31T22:12:35Z\",\"projectName\":\"pocket-daily\",\"controlMode\":\"observed\",\"alive\":true,\"liveAnswerable\":false,\"port\":9120}],\"type\":\"sessions_list\"}"
+
+    @Test
+    fun `a real sessions_list frame from the Swift daemon parses`() {
+        val event = parseBridgeMessage(liveSwiftDaemonSessionsFrame)
+        assertNotNull("live sessions_list frame must parse", event)
+        assertTrue(event is BridgeEvent.SessionsList)
+    }
+
 }

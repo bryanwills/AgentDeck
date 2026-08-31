@@ -385,7 +385,18 @@ data class SubagentSummary(
     val peak: Int = 0,
     /** Children finished in this wave. */
     val completed: Int = 0,
-    /** Epoch ms of the most recent child stop. */
+    /** Epoch ms of the most recent child stop.
+     *
+     *  Flexible because the Swift daemon writes this one as a Double —
+     *  `Date.timeIntervalSince1970 * 1000` without the `Int(...)` its pairing
+     *  routes apply — so the wire carries `1788214664925.6821`. A plain `Long`
+     *  refuses that, and because the census rides inside `SessionInfo` the
+     *  refusal fails the WHOLE `sessions_list` decode: one session with a
+     *  finished subagent blanked the session list on every Android device,
+     *  logged only as "Unparsed WS message" (measured 2026-09-01). The same
+     *  hazard is already defended on `BridgeTimelineEntry`'s stamps; this field
+     *  was simply added later and missed it. */
+    @Serializable(with = FlexibleLongSerializer::class)
     val lastCompletedAt: Long? = null,
 )
 

@@ -38,6 +38,35 @@ file's own rule forbids reconstructing its notes. The commit above is the
 record. `npm 1.0.16` (`37c674b8`) is a different case and needs nothing — it was
 bumped, superseded by 1.0.17, and never published, so it exists only in git.
 
+## 2026-09-01 — Android 1.0.13
+
+### One fractional timestamp emptied the whole session list
+
+Every Android device was showing `Sessions 0` while the daemon held seven, and
+the only trace was a `W/BridgeConnection: Unparsed WS message` line truncated at
+200 characters. The subagent census carries `lastCompletedAt`, and the Swift
+daemon writes it as `Date.timeIntervalSince1970 * 1000` without the `Int(...)`
+its pairing routes apply — so the wire carries `1788214664925.6821`. Kotlin
+declared it a plain `Long`, and kotlinx refuses a fractional number for one.
+
+The census rides inside `SessionInfo`, so that refusal did not drop a field or a
+row: it failed the whole `List<SessionInfo>` decode, `parseBridgeMessage`
+returned null, and the frame was discarded. One session with a finished subagent
+was enough to blank the roster, and on a busy machine that is the steady state —
+measured on a Crema S, 242 consecutive `sessions_list` frames rejected while the
+timeline beside it rendered every row in real time.
+
+The timeline renders because `BridgeTimelineEntry` already defends its stamps
+with `FlexibleLongSerializer`, whose body is exactly this case
+(`doubleOrNull → toLong()`). The census was added later and missed it; it now
+carries the same annotation.
+
+The regression gate is a `sessions_list` frame captured verbatim off a live
+daemon rather than composed from the decoder's own field list — a fixture built
+from what the reader expects agrees with it forever and cannot catch a producer
+emitting a shape the reader refuses, which is how this survived until a device
+was looked at.
+
 ## 2026-08-31 — Android 1.0.12
 
 ### A device is approved as itself, and a focused session gets its creature back
