@@ -75,6 +75,17 @@ external:
   `npm view @agentdeck/bridge versions` is what surfaces a published-but-untagged
   version; `npm view … version` cannot, because it answers with the newest one.
 
+**Push release tags one at a time, never in one batch.** GitHub creates no
+workflow event for a push carrying more than three tags — documented behavior,
+measured here on 2026-09-02: all six `*-v1.2.0` tags pushed in one command
+landed on the remote and fired **zero** release workflows, silently. Nothing
+was red; the newest run of every release workflow was simply last month's. The
+recovery is to delete the remote tags and re-push each one in its own
+`git push origin <tag>` — re-pushing an *existing* tag fires nothing, so the
+delete is required, and it is safe exactly while no run has consumed the tag
+(check `gh run list --workflow=<wf>` first). A coordinated round is six pushes,
+not one.
+
 That last check found `npm 1.0.14` on 2026-08-23 — live on the registry, no tag, no
 Release, superseded six minutes later by 1.0.15, which is why the tag step never ran.
 See CHANGELOG.md § Known gaps for the commit that is now its record.
