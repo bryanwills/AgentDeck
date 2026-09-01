@@ -155,6 +155,12 @@ replacing another on the InkDeck now spends one full flash: under a partial
 waveform the old text ghosts beneath the new, which reads as overlapping
 print, not as fading.
 
+The EPD47 queue shows the whole roster — attention, then working, then idle —
+instead of only active sessions, which had the largest panel in the fleet
+showing the fewest rows; its footer timeline renders in full ink at 12pt,
+because the muted caption gray that works inside a card was illegible from
+across a desk.
+
 ### Surface modes and pull-aware paper faces
 
 Offline, sleeping, live, and interactive states are explicit surface modes with

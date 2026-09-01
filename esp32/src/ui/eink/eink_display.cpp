@@ -1594,19 +1594,20 @@ void drawEp47Footer(const Snap& s) {
     // timeline rows, and the one capability hint that changes what a user
     // does with their hands. The first row shares its width with that hint;
     // the second gets the full span.
+    // Full ink and 12pt: the footer is read from across a desk, and the muted
+    // gray body ink that works for in-card captions was illegible here.
     const uint8_t tickerLines = s.tickerCount > 1 ? 2 : s.tickerCount;
     for (uint8_t ti = 0; ti < tickerLines; ti++) {
         char event[116];
-        const int16_t lineY = y + 8 + (int16_t)ti * 24;
+        const int16_t lineY = y + 12 + (int16_t)ti * 26;
         smartFitText(event, sizeof(event), s.tickerText[ti],
-                     ti == 0 ? 660 : (int16_t)(W - 40), &FreeSans9pt7b);
-        InkScope ink(EINK_INK_BODY);
-        smartTextAt(20, lineY, event, &FreeSans9pt7b);
+                     ti == 0 ? 640 : (int16_t)(W - 40), &FreeSansBold12pt7b);
+        smartTextAt(20, lineY, event, &FreeSansBold12pt7b);
     }
     if (!epd47TouchAvailable()) {
-        textRight(W - 20, y + 8, "TOUCH OFF  |  GPIO21 NEXT", CLASSIC_FONT);
+        textRight(W - 20, y + 12, "TOUCH OFF  |  GPIO21 NEXT", CLASSIC_FONT);
     } else if (s.agPlan[0]) {
-        textRight(W - 20, y + 8, s.agPlan, CLASSIC_FONT);
+        textRight(W - 20, y + 12, s.agPlan, CLASSIC_FONT);
     }
 }
 
@@ -1748,12 +1749,19 @@ void drawEp47Focus(const Snap& s) {
 }
 
 uint8_t epd47ActiveOrder(const Snap& s, uint8_t out[MAX_ROWS]) {
+    // The whole roster, attention first, then working, then idle. This used
+    // to admit only attention+processing, which put the largest panel in the
+    // fleet at odds with every other surface (and with the row-geometry note
+    // below, which sized seven rows to "cover the whole session set"): a
+    // machine with two working sessions out of seven showed two rows and
+    // blank paper. Idle rows are still rows — the state column says idle.
     uint8_t n = 0;
-    constexpr AgentDeckEink::StatusKind kinds[2] = {
+    constexpr AgentDeckEink::StatusKind kinds[3] = {
         AgentDeckEink::StatusKind::Attention,
         AgentDeckEink::StatusKind::Processing,
+        AgentDeckEink::StatusKind::Idle,
     };
-    for (uint8_t k = 0; k < 2; k++) {
+    for (uint8_t k = 0; k < 3; k++) {
         for (uint8_t i = 0; i < s.rowCount; i++)
             if (AgentDeckEink::classifyStatus(s.rows[i].state) == kinds[k]) out[n++] = i;
     }
@@ -1814,7 +1822,7 @@ void drawEp47Queue(const Snap& s) {
         InkScope ink(EINK_INK_BODY);
         textAt(36, 204, "LIMITS is the automatic resting page.", &FreeSans9pt7b);
     } else if (count > shown) {
-        char more[32]; snprintf(more, sizeof(more), "+%u MORE ACTIVE", (unsigned)(count - shown));
+        char more[32]; snprintf(more, sizeof(more), "+%u MORE", (unsigned)(count - shown));
         InkScope ink(EINK_INK_MUTED);
         textRight(936, 440, more, &FreeSansBold9pt7b);
     }
