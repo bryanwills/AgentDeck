@@ -1291,6 +1291,18 @@ PaperFace lastPhysicalFace = PaperFace::Glance;
 bool physicalFaceReady = false;
 uint8_t lastPhysicalAttention = 0;
 uint8_t lastPhysicalWorking = 0;
+// Settled-count bypass. The ambient floor exists because turn churn makes the
+// working count flap every few seconds, and every admitted NM repaint is a
+// ~10s full tri-color cycle — but the glance face's whole content IS these
+// counts, and a number that stays wrong for 15 minutes reads as a frozen
+// panel. A changed count that HOLDS for the settle window is a real state
+// shift and earns the repaint; a flap never settles and stays coalesced.
+// 90s: longer than the between-turns bounce, far under the ambient floor —
+// chosen, not measured. Same shape as the EPD47 page arbiter's settle.
+uint8_t nmPendingAttention = 255;
+uint8_t nmPendingWorking = 255;
+uint32_t nmCountStableSinceMs = 0;
+constexpr uint32_t NM_COUNT_SETTLE_MS = 90UL * 1000UL;
 #endif
 uint32_t faceHoldUntilMs = 0;
 uint32_t interactiveLeaseUntilMs = 0;
@@ -2786,6 +2798,21 @@ void render() {
     urgentTransition = urgentTransition || !physicalFaceReady ||
                        renderFace != lastPhysicalFace ||
                        nmAttention > lastPhysicalAttention;
+    // Settled-count bypass (see NM_COUNT_SETTLE_MS above): render() runs every
+    // loop tick, so this re-evaluates until the pending change either settles
+    // into a repaint or the counts bounce back and clear the candidate.
+    if (nmAttention != lastPhysicalAttention || nmWorking != lastPhysicalWorking) {
+        if (nmAttention != nmPendingAttention || nmWorking != nmPendingWorking) {
+            nmPendingAttention = nmAttention;
+            nmPendingWorking = nmWorking;
+            nmCountStableSinceMs = now;
+        } else if ((uint32_t)(now - nmCountStableSinceMs) >= NM_COUNT_SETTLE_MS) {
+            urgentTransition = true;
+        }
+    } else {
+        nmPendingAttention = 255;
+        nmPendingWorking = 255;
+    }
 #endif
     if (!forceFull && !forceRefresh && !urgentTransition &&
         (now - lastDrawMs) < MIN_REFRESH_INTERVAL_MS) return;  // coalesce bursts
