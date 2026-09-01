@@ -152,6 +152,17 @@ from what the reader expects agrees with it forever and cannot catch a producer
 emitting a shape the reader refuses, which is how this survived until a device
 was looked at.
 
+### A refusal is a holdoff, not a ban — so approval works without a restart
+
+A daemon that closed us 4001 was remembered as refused until the app could
+offer it a credential. Operator approval mints no token, so the one flow that
+makes the endpoint dialable again could never retire the memory: the knock
+stream stopped, the operator approved a device that never dialed back, and the
+grant took effect only after an app restart. The refusal now expires on read
+after a 30-second holdoff — an aged-out refusal buys exactly one redial, a
+daemon that still refuses re-stamps it, so the steady state is one knock per
+holdoff instead of the per-emission hammer the memory exists to stop.
+
 ### A device is approved as itself, and a focused session gets its creature back
 
 The dashboard now names itself in the WebSocket handshake with a random

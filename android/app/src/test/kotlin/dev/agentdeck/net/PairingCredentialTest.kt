@@ -108,12 +108,21 @@ class PairingCredentialTest {
     // matter most on a camera-less e-ink reader: over `adb reverse` it is
     // same-machine and needs no token, and it cannot scan a pairing QR.
 
+    private val now = 1_000_000_000L
+
     private fun mayDial(
         current: String? = null,
         loopbackTried: Boolean = true,
-        unauthorized: Set<String> = emptySet(),
+        unauthorized: Map<String, Long> = emptyMap(),
         saved: String? = null,
-    ) = PairingCredential.mayDialDiscovered(discovered, current, loopbackTried, unauthorized, saved)
+        nowMs: Long = now,
+    ) = PairingCredential.mayDialDiscovered(
+        discovered, current, loopbackTried, unauthorized, saved, nowMs,
+    )
+
+    /** A refusal stamped fresh enough that the holdoff still applies. */
+    private fun refusedNow(vararg endpoints: String): Map<String, Long> =
+        endpoints.associateWith { now }
 
     @Test
     fun `the LAN endpoint is dialled once nothing else is in flight`() {
@@ -135,20 +144,40 @@ class PairingCredentialTest {
     }
 
     @Test
-    fun `an endpoint that closed us 4001 is not redialled`() {
+    fun `an endpoint that closed us 4001 is not redialled inside the holdoff`() {
         // The socket layer clears the URL on 4001, so "rejected" and "never
         // tried" look identical from here unless the refusal is its own fact.
-        assertFalse(mayDial(unauthorized = setOf("192.168.1.10:9120")))
+        assertFalse(mayDial(unauthorized = refusedNow("192.168.1.10:9120")))
+        assertFalse(
+            mayDial(
+                unauthorized = mapOf("192.168.1.10:9120" to now),
+                nowMs = now + PairingCredential.UNAUTHORIZED_REDIAL_HOLDOFF_MS - 1,
+            )
+        )
+    }
+
+    @Test
+    fun `a refusal expires on read, because approval mints no token`() {
+        // Operator approval makes the endpoint dialable without giving the
+        // device any new credential to offer — so a refusal remembered without
+        // an age could only ever be retired by an app restart. An aged-out
+        // refusal buys one redial; a daemon that still refuses re-stamps it.
+        assertTrue(
+            mayDial(
+                unauthorized = mapOf("192.168.1.10:9120" to now),
+                nowMs = now + PairingCredential.UNAUTHORIZED_REDIAL_HOLDOFF_MS,
+            )
+        )
     }
 
     @Test
     fun `a refused endpoint is dialled again once we hold a credential for it`() {
-        assertTrue(mayDial(unauthorized = setOf("192.168.1.10:9120"), saved = paired))
+        assertTrue(mayDial(unauthorized = refusedNow("192.168.1.10:9120"), saved = paired))
     }
 
     @Test
     fun `a refusal is remembered per endpoint, not globally`() {
-        assertTrue(mayDial(unauthorized = setOf("192.168.1.99:9120")))
+        assertTrue(mayDial(unauthorized = refusedNow("192.168.1.99:9120")))
     }
 
     // ── what the disconnected screen says ────────────────────────────────
@@ -220,11 +249,11 @@ class PairingCredentialTest {
         // A dual-homed daemon is offered as both its TXT ip and its
         // NSD-resolved host, and the reconnect ladder fails over between them.
         // With a single remembered refusal the two took turns looking new.
-        val refused = setOf("192.168.1.10:9120", "macbook.local:9120")
+        val refused = refusedNow("192.168.1.10:9120", "macbook.local:9120")
         assertFalse(mayDial(unauthorized = refused))
         assertFalse(
             PairingCredential.mayDialDiscovered(
-                "ws://macbook.local:9120", null, true, refused, null,
+                "ws://macbook.local:9120", null, true, refused, null, now,
             )
         )
     }

@@ -40,10 +40,12 @@ private inline fun autoConnectDebug(message: () -> String) {
  *    same-machine and needs no pairing token at all, which matters most on a
  *    reader with no camera to scan a QR with. mDNS visibility says nothing
  *    about whether that tunnel works, so it must not preempt the probe.
- *  - **An endpoint that closed us 4001 is not dialled again** until we have a
- *    credential to offer it. See [PairingCredential.mayDialDiscovered]; the
- *    memory lives in [BridgeConnection.unauthorizedEndpoints] because the
- *    socket layer clears the URL in the same breath as it stops reconnecting.
+ *  - **An endpoint that closed us 4001 is held off, not banned** — the
+ *    refusal ages out on read so an operator approval (which mints no token)
+ *    can take effect on the next knock. See
+ *    [PairingCredential.mayDialDiscovered]; the memory lives in
+ *    [BridgeConnection.unauthorizedEndpoints] because the socket layer clears
+ *    the URL in the same breath as it stops reconnecting.
  *  - **Every retry is paced.** A device that can reach neither path settles
  *    into one loopback probe every couple of minutes, not a permanent cycle of
  *    "connecting over USB" / "USB bridge not found".
@@ -77,8 +79,9 @@ fun BridgeAutoConnect(
         discoveredUrl = daemon.wsUrl(),
         currentUrl = connection.url.value,
         loopbackTried = loopbackTried,
-        unauthorizedEndpoints = connection.unauthorizedEndpoints.value,
+        unauthorizedAt = connection.unauthorizedEndpoints.value,
         savedUrl = connection.pairedUrl,
+        nowMs = System.currentTimeMillis(),
     )
 
     // ── 1. Startup: loopback, then the saved URL ──────────────────────────

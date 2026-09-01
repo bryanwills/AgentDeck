@@ -167,15 +167,27 @@ object PairingCredential {
      * window before the first loopback dial has been issued, when there is no
      * URL yet to hold the turn.
      *
-     * **A 4001 endpoint is not dialable again without a credential.** The
-     * socket layer stops its own reconnect on 4001 — and also clears the URL,
-     * which made "rejected" indistinguishable from "never tried" to the layer
-     * above, so every discovery emission redialled it (measured at ~25/s
-     * against a live daemon). Rejection has to be remembered as its own fact,
-     * keyed by ENDPOINT like every other credential decision here — and as a
-     * SET, because one daemon can be offered under two spellings (the TXT ip
-     * and the NSD-resolved host), and remembering only the last refusal lets
-     * the two take turns being "new".
+     * **A 4001 endpoint is held off, not banned.** The socket layer stops its
+     * own reconnect on 4001 — and also clears the URL, which made "rejected"
+     * indistinguishable from "never tried" to the layer above, so every
+     * discovery emission redialled it (measured at ~25/s against a live
+     * daemon). Rejection has to be remembered as its own fact, keyed by
+     * ENDPOINT like every other credential decision here — and per spelling,
+     * because one daemon can be offered under two (the TXT ip and the
+     * NSD-resolved host), and remembering only the last refusal lets the two
+     * take turns being "new".
+     *
+     * The memory expires ON READ after [UNAUTHORIZED_REDIAL_HOLDOFF_MS],
+     * because a permanent ban breaks operator approval: the daemon's knock
+     * list is fed by refused dials, and an approval grants access WITHOUT
+     * minting a token — so "refused until we hold a credential" meant an
+     * approved device never redialled and the grant took effect only after an
+     * app restart. An expired refusal buys exactly one redial; an endpoint
+     * that still refuses re-stamps the memory, so the steady state is one
+     * knock per holdoff per endpoint, not the per-emission hammer the memory
+     * exists to stop. Read-time, not a timer, for the same reason as the
+     * daemon's pairing window: a timer firing late extends a promise, a read
+     * check self-heals.
      *
      * Android-only, unlike the rest of this object: `adb reverse` has no Apple
      * analogue and Apple's reconnect ladder lives in `AgentStateHolder`. The
@@ -185,20 +197,31 @@ object PairingCredential {
         discoveredUrl: String,
         currentUrl: String?,
         loopbackTried: Boolean,
-        unauthorizedEndpoints: Set<String>,
+        unauthorizedAt: Map<String, Long>,
         savedUrl: String?,
+        nowMs: Long,
     ): Boolean {
         // Something is already being tried — the loopback probe included.
         if (currentUrl != null) return false
         // The first loopback dial has not been issued yet; it answers first.
         if (!loopbackTried) return false
-        // Rejected here before, and we still have nothing new to offer it.
+        // Rejected here recently, and we still have nothing new to offer it.
         val endpoint = endpointOf(discoveredUrl) ?: return true
-        if (endpoint in unauthorizedEndpoints &&
+        val refusedAt = unauthorizedAt[endpoint]
+        if (refusedAt != null &&
+            nowMs - refusedAt < UNAUTHORIZED_REDIAL_HOLDOFF_MS &&
             tokenIn(resolve(discoveredUrl, savedUrl)) == null
         ) {
             return false
         }
         return true
     }
+
+    /**
+     * How long a 4001 refusal suppresses redials to that endpoint. Long enough
+     * that a device parked next to a daemon that will never approve it is a
+     * couple of knocks a minute, short enough that an operator watching the
+     * Pair a Device window sees their approval take effect on the next knock.
+     */
+    const val UNAUTHORIZED_REDIAL_HOLDOFF_MS = 30_000L
 }

@@ -115,14 +115,18 @@ class BridgeConnection private constructor() {
      * has been tried", so it redialled on every mDNS emission. A rejection has
      * to survive that clearing — see `PairingCredential.mayDialDiscovered`.
      *
-     * A set, not a single value: a dual-homed daemon is offered under two
-     * spellings (TXT ip and NSD-resolved host) and the reconnect ladder fails
+     * Keyed per spelling, not a single value: a dual-homed daemon is offered
+     * under two (TXT ip and NSD-resolved host) and the reconnect ladder fails
      * over between them, so one slot would let the two take turns looking new.
-     * Bounded at [MAX_REMEMBERED_REFUSALS] — this is a hint that stops a
-     * hammer, not an audit log.
+     * The value is WHEN the refusal happened, because the memory expires on
+     * read (`PairingCredential.UNAUTHORIZED_REDIAL_HOLDOFF_MS`) — operator
+     * approval grants access without minting a token, so a refusal remembered
+     * without an age could never be retired by the one flow that makes the
+     * endpoint dialable again. Bounded at [MAX_REMEMBERED_REFUSALS] — this is
+     * a hint that stops a hammer, not an audit log.
      */
-    private val _unauthorizedEndpoints = MutableStateFlow<Set<String>>(emptySet())
-    val unauthorizedEndpoints: StateFlow<Set<String>> = _unauthorizedEndpoints.asStateFlow()
+    private val _unauthorizedEndpoints = MutableStateFlow<Map<String, Long>>(emptyMap())
+    val unauthorizedEndpoints: StateFlow<Map<String, Long>> = _unauthorizedEndpoints.asStateFlow()
 
     /** True when actively trying to reconnect to a known URL. */
     private val _isReconnecting = MutableStateFlow(false)
@@ -290,9 +294,11 @@ class BridgeConnection private constructor() {
                     // otherwise redial this same endpoint on every discovery tick.
                     PairingCredential.endpointOf(_url.value)?.let { endpoint ->
                         _unauthorizedEndpoints.update { current ->
-                            (current + endpoint).let {
+                            (current + (endpoint to System.currentTimeMillis())).let {
                                 if (it.size <= MAX_REMEMBERED_REFUSALS) it
-                                else it.drop(it.size - MAX_REMEMBERED_REFUSALS).toSet()
+                                else it.entries.sortedBy { e -> e.value }
+                                    .drop(it.size - MAX_REMEMBERED_REFUSALS)
+                                    .associate { e -> e.key to e.value }
                             }
                         }
                     }
