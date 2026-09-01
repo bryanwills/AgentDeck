@@ -211,6 +211,14 @@ import { loadTimeboxDevices } from './timebox/timebox-settings.js';
 import { getLanIp, stripUnsafeText, cleanRawText, prepareMarkdownDetail, normalizeCommandPrompt, formatDurationSec, type TimelineEntry, PluginCommand } from '@agentdeck/shared';
 import { injectOpenClawSession, OPENCLAW_SESSION_ID } from './openclaw-session.js';
 import {
+  GatewayFlapTracker,
+  GATEWAY_FLAP_WINDOW_MS,
+  diagnoseGatewayLog,
+  formatGatewayInstability,
+  readGatewayLogTail,
+  type GatewayInstability,
+} from './openclaw-gateway-stability.js';
+import {
   buildCardFeed, buildGlance, projectPortableReaderGlance, applyOutboxDecisions, FeedPullTracker, formatFeedPull,
   applyPullOtaBootstrap,
   OutboxIdempotencyLedger,
@@ -1607,6 +1615,54 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   let gatewaySessionState = 'idle';
   let gatewayModelName: string | undefined;
 
+  // Restart-storm detector for the Gateway link. Each disconnect is a flap;
+  // three inside ten minutes is an instability, and the reason is read off
+  // OpenClaw's own log tail because nothing on this side can know it. The
+  // finding rides `/status` + `/health` (`gateway.instability`) and one
+  // `error` timeline row per escalation, so a link that keeps "recovering"
+  // cannot pass for healthy on any surface. Cleared once the window drains.
+  const gatewayFlaps = new GatewayFlapTracker();
+  let gatewayInstability: GatewayInstability | null = null;
+  let gatewayInstabilityAssessing = false;
+
+  async function assessGatewayInstability(nowMs: number): Promise<void> {
+    if (gatewayInstabilityAssessing) return;
+    const a = gatewayFlaps.assess(nowMs);
+    if (!a.unstable) return;
+    // Escalate only when the count grows; a stable count is old news.
+    if (gatewayInstability && gatewayInstability.flapsInWindow >= a.flapsInWindow) return;
+    gatewayInstabilityAssessing = true;
+    try {
+      const diagnosis = diagnoseGatewayLog(await readGatewayLogTail());
+      gatewayInstability = {
+        flapsInWindow: a.flapsInWindow,
+        windowMs: GATEWAY_FLAP_WINDOW_MS,
+        since: a.since ?? nowMs,
+        lastFlapAt: nowMs,
+        diagnosis,
+      };
+      const line = formatGatewayInstability(gatewayInstability);
+      log(`[agentdeck] ${line}${diagnosis ? ` — ${diagnosis.hint}` : ''}`);
+      core.bridgeTimeline.addEntry({
+        ts: nowMs, type: 'error',
+        raw: line.slice(0, 197),
+        detail: diagnosis ? `${diagnosis.hint}\n\n${diagnosis.line}` : undefined,
+        sessionId: OPENCLAW_SESSION_ID,
+        agentType: 'openclaw',
+      } as TimelineEntry);
+      core.stateMachine.emit('state_changed', core.stateMachine.getSnapshot());
+    } finally {
+      gatewayInstabilityAssessing = false;
+    }
+  }
+
+  function settleGatewayInstability(nowMs: number): void {
+    if (gatewayInstability && !gatewayFlaps.assess(nowMs).unstable) {
+      log('[agentdeck] OpenClaw Gateway stable again — instability cleared');
+      gatewayInstability = null;
+    }
+  }
+
   /**
    * Snapshot for an `openclaw` state event: the global machine with the
    * Gateway-local model pinned back on.
@@ -1805,6 +1861,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       res.end(JSON.stringify({
         status: 'ok', mode: 'daemon', state: snap.state,
         gateway: gatewayAdapter?.isAlive() ? 'connected' : 'disconnected',
+        // A link that keeps reconnecting reads `connected` at every sample.
+        // This is the field that says the samples were lying (null = stable).
+        gatewayInstability,
         uptime: process.uptime(), port, pid: process.pid,
         // Which build is SERVING this port. Captured when this process started
         // (see daemon-build-identity.ts) and never recomputed, so a rebuild
@@ -1980,6 +2039,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           available: core.cachedGatewayAvailable,
           connected: core.cachedGatewayConnected,
           hasError: core.cachedGatewayHasError,
+          instability: gatewayInstability,
         },
         clients: core.wsServer.getClientCount(),
         modules: moduleHealthProvider(),
@@ -4715,6 +4775,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             gatewaySessionState = 'idle';
             bridgeLogStream.start();
             log('[agentdeck] OpenClaw Gateway connected');
+            settleGatewayInstability(Date.now());
             if (core.stateMachine.getSnapshot().state === 'disconnected') {
               core.stateMachine.handleHookEvent('SessionStart', {});
             }
@@ -4739,6 +4800,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             log('[agentdeck] OpenClaw Gateway disconnected');
             core.stateMachine.emit('state_changed', core.stateMachine.getSnapshot());
             core.broadcastSessionsList().catch(() => {});
+            const flapAt = Date.now();
+            gatewayFlaps.record(flapAt);
+            assessGatewayInstability(flapAt).catch((err) => {
+              debug('Gateway', `instability assessment failed: ${String(err)}`);
+            });
           }
           break;
         }
