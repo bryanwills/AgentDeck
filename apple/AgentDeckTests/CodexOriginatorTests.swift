@@ -33,11 +33,15 @@ final class CodexOriginatorTests: XCTestCase {
         try body.data(using: .utf8)!.write(to: url)
     }
 
-    private func metaLine(originator: String, id: String) -> String {
-        // Shape captured off a live rollout — keys and nesting verbatim,
-        // long free-text fields shortened.
-        """
-        {"timestamp":"2026-08-31T15:53:40.772Z","ordinal":0,"type":"session_meta","payload":{"session_id":"\(id)","id":"\(id)","timestamp":"2026-08-31T15:52:37.127Z","cwd":"/Users/u/project","originator":"\(originator)","cli_version":"0.150.0-alpha.8","source":"vscode","thread_source":"user","model_provider":"openai"}}
+    private func metaLine(originator: String, id: String, instructionBytes: Int = 20_000) -> String {
+        // Shape captured off a live rollout — keys and nesting verbatim. The
+        // base_instructions bulk is load-bearing, not decoration: real first
+        // lines measure 18–22 KB (20-rollout survey, 2026-09-01), and a
+        // fixture patterned on a `head -c 600` capture hid that the 8 KB head
+        // window truncated every real line into a no-claim verdict.
+        let instructions = String(repeating: "x", count: instructionBytes)
+        return """
+        {"timestamp":"2026-08-31T15:53:40.772Z","ordinal":0,"type":"session_meta","payload":{"session_id":"\(id)","id":"\(id)","timestamp":"2026-08-31T15:52:37.127Z","cwd":"/Users/u/project","originator":"\(originator)","cli_version":"0.150.0-alpha.8","source":"vscode","thread_source":"user","model_provider":"openai","base_instructions":{"text":"\(instructions)"}}}
         """
     }
 

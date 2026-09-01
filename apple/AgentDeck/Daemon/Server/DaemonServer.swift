@@ -352,7 +352,12 @@ enum CodexRolloutResponseReader {
         return lastAgentMessage
     }
 
-    private static let headBytes = 8 * 1024
+    // The first line carries payload.base_instructions — the agent's full
+    // system prompt — so it is measured at 18–22 KB on a real store
+    // (2026-09-01, 20 rollouts; max 21,736 bytes). An 8 KB window truncated
+    // every real first line and the truncation guard correctly answered
+    // "no claim", which read as TUI downstream. 128 KB matches tailBytes.
+    private static let headBytes = 128 * 1024
 
     /// Whether the rollout's `session_meta` names a desktop originator.
     ///
@@ -1414,11 +1419,34 @@ final class DaemonServer {
            now - missedAt < Self.codexOriginatorRetrySeconds {
             return Self.codexCliAgentType
         }
-        if let desktop = CodexRolloutResponseReader.originatorIsDesktop(sessionId: sessionId) {
+        // Sandboxed builds reach ~/.codex only through the user-granted
+        // security-scoped bookmark — the default home resolves to the app
+        // CONTAINER there, and a rollout that exists on disk reads as absent
+        // (measured 2026-09-01: a session whose rollout said "Codex Desktop"
+        // stayed codex-cli until this read moved inside the scope). The READ
+        // must happen inside the closure: the security scope opens around
+        // `body` and closes when it returns, so a URL carried out of it is a
+        // path without access. With no bookmark, fall through to the real
+        // home for unsandboxed contexts.
+        var bookmarkSeen = false
+        let desktopVerdict = AppPreferences.shared.withCodexDirectoryAccess { dir -> Bool? in
+            bookmarkSeen = true
+            return CodexRolloutResponseReader.originatorIsDesktop(
+                sessionId: sessionId,
+                sessionsRoot: dir.appendingPathComponent("sessions", isDirectory: true))
+        } ?? CodexRolloutResponseReader.originatorIsDesktop(sessionId: sessionId)
+        if let desktop = desktopVerdict {
             codexDesktopBySession[sessionId] = desktop
             codexOriginatorMissAt.removeValue(forKey: sessionId)
+            DaemonLogger.shared.debug(
+                "Hook", "Codex originator for \(sessionId): desktop=\(desktop) bookmark=\(bookmarkSeen)")
             return desktop ? Self.codexAppAgentType : Self.codexCliAgentType
         }
+        // Logged because a silent miss is indistinguishable from a TUI verdict
+        // on every surface, and this read has already failed silently twice
+        // (container-home root, then a URL carried out of its security scope).
+        DaemonLogger.shared.debug(
+            "Hook", "Codex originator for \(sessionId): unreadable (bookmark=\(bookmarkSeen)); assuming TUI for \(Int(Self.codexOriginatorRetrySeconds))s")
         codexOriginatorMissAt[sessionId] = now
         return Self.codexCliAgentType
     }
