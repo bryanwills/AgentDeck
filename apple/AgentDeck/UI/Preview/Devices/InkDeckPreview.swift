@@ -38,7 +38,7 @@
 // fails CI when the firmware drifts ahead of this mirror. Update this view and
 // re-pin whenever the firmware layout changes.
 //
-// SYNC-HASH esp32/src/ui/eink/eink_display.cpp b644ec9b9f39f1ab64675fc8f25badc90376b695
+// SYNC-HASH esp32/src/ui/eink/eink_display.cpp 9c3569ddde8e970e6c6c9cccab8a0a538c3163eb
 // SYNC-HASH esp32/src/ui/eink/eink_dashboard_layout.h 9179d41777d6e2caff02735607ad7ca210de8bb8
 
 import SwiftUI
