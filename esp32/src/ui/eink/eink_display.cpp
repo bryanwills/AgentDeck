@@ -110,9 +110,8 @@ static_assert(BOARD_EINK_ROTATION == 0 || BOARD_EINK_ROTATION == 2,
 // longest refresh in the fleet, and 100% of this board's repaints are full
 // (measured 2026-08-30: 93/93). Spending one to advance an elapsed-time string
 // or a percentage by a point is the wrong trade, so the routine floor is an
-// ambient cadence and the coarse facts the face is BUILT around — how many
-// sessions need you, how many are working, and whether the link is up — bypass
-// it through urgentTransition below.
+// ambient cadence. Only link/page transitions and NEW user attention bypass it;
+// routine working-count churn is exactly the stream that must be coalesced.
 constexpr uint32_t MIN_REFRESH_INTERVAL_MS = 15UL * 60UL * 1000UL;
 #elif defined(BOARD_LILYGO_EPD47)
 constexpr uint32_t MIN_REFRESH_INTERVAL_MS = 60000;
@@ -1475,7 +1474,7 @@ void drawPaperHeader(const Snap& s, PaperFace face) {
     // GLANCE is an internal arbitration state, not product-facing navigation.
     // The resting page keeps the product name; alternate pages name the
     // durable thing the user deliberately opened.
-    const char* title = face == PaperFace::Glance ? "AGENTDECK" : faceName(face);
+    const char* title = face == PaperFace::Glance ? "AgentDeck" : faceName(face);
     textAt(pad + (W <= 420 ? 40 : 54), W <= 420 ? 36 : 46,
            title, W <= 420 ? &FreeSansBold12pt7b : &FreeSansBold18pt7b);
     char status[40];
@@ -1527,7 +1526,7 @@ AgentDeckEpd47::Page epd47AutomaticPage(const Snap& s) {
 // Tab strip geometry. SHARED with the touch hit test below — these used to be a
 // local constexpr in the renderer and three bare literals in the tap handler,
 // which is a silent mis-hit waiting for the first time either moves. tabX
-// clears the 18pt AGENTDECK wordmark; the strip must also end before the
+// clears the 18pt AgentDeck wordmark; the strip must also end before the
 // right-aligned link label.
 constexpr int16_t EPD47_HEADER_H = 76;
 constexpr int16_t EPD47_TAB_X = 330;
@@ -1542,7 +1541,7 @@ void drawEp47Chrome(const Snap& s, AgentDeckEpd47::Page selected) {
     constexpr int16_t headerH = EPD47_HEADER_H;
     display.fillRect(0, 0, W, 8, GxEPD_BLACK);
     drawAgentDeckMark(20, 14, 38);
-    textAt(72, 45, "AGENTDECK", &FreeSansBold18pt7b);
+    textAt(72, 45, "AgentDeck", &FreeSansBold18pt7b);
 
     for (uint8_t i = 0; i < EPD47_TAB_COUNT; i++) {
         const auto page = static_cast<AgentDeckEpd47::Page>(i);
@@ -1598,7 +1597,7 @@ void drawEp47Footer(const Snap& s, const char* automaticReason) {
         smartTextAt(250, y + 20, event, &FreeSans9pt7b);
     }
     if (!epd47TouchAvailable()) {
-        textRight(W - 20, y + 20, "GPIO21  NEXT", CLASSIC_FONT);
+        textRight(W - 20, y + 20, "TOUCH OFF  |  GPIO21 NEXT", CLASSIC_FONT);
     } else if (s.agPlan[0]) {
         textRight(W - 20, y + 20, s.agPlan, CLASSIC_FONT);
     }
@@ -1902,14 +1901,40 @@ void drawGlanceFace(const Snap& s) {
             textRight(W - pad, ry, state, CLASSIC_FONT);
         }
     }
-    const int16_t usageY = H - (W <= 420 ? 52 : 38);
+#if defined(AGENTDECK_NM_UI)
+    // The old two-gauge strip silently discarded both 7D windows and every
+    // reset time. The 4.2-inch panel has room for all four limits when they are
+    // arranged as provider rows, keeping the main session summary intact.
+    constexpr int16_t usageY = 220;
+    constexpr int16_t providerW = 34;
+    const int16_t gaugeX = x + providerW;
+    const int16_t gaugeGap = 8;
+    const int16_t gaugeW = (W - gaugeX - pad - gaugeGap) / 2;
+    textAt(x, usageY + 10, "CLA", CLASSIC_FONT);
+    drawMiniUsage(gaugeX, usageY, gaugeW, "5H", s.fiveH, 18);
+    drawMiniUsage(gaugeX + gaugeW + gaugeGap, usageY, gaugeW, "7D", s.sevenD, 18);
+    textAt(x, usageY + 29, "CDX", CLASSIC_FONT);
+    drawMiniUsage(gaugeX, usageY + 19, gaugeW, "5H", s.codexP, 18);
+    drawMiniUsage(gaugeX + gaugeW + gaugeGap, usageY + 19, gaugeW, "7D", s.codexS, 18);
+
+    char resets[88];
+    snprintf(resets, sizeof(resets), "RESET C %s / %s  X %s / %s",
+             s.fiveReset[0] ? s.fiveReset : "--",
+             s.sevenReset[0] ? s.sevenReset : "--",
+             s.codexPReset[0] ? s.codexPReset : "--",
+             s.codexSReset[0] ? s.codexSReset : "--");
+    char fittedResets[88];
+    smartFitText(fittedResets, sizeof(fittedResets), resets, W - x - pad, CLASSIC_FONT);
+    smartTextAt(x, usageY + 56, fittedResets, CLASSIC_FONT);
+
+    display.drawFastHLine(pad, H - 25, W - pad * 2, GxEPD_BLACK);
+    textAt(pad, H - 10, attention > 0 ? "BOOT  DECIDE" : "BOOT  HISTORY", CLASSIC_FONT);
+    textRight(W - pad, H - 10, "USER  HOME", CLASSIC_FONT);
+#else
+    const int16_t usageY = H - 38;
     const int16_t uw = (W - x - pad - 12) / 2;
     drawMiniUsage(x, usageY, uw, "CLA", s.fiveH);
     drawMiniUsage(x + uw + 12, usageY, uw, "CDX", s.codexP);
-#if defined(AGENTDECK_NM_UI)
-    display.drawFastHLine(pad, H - 29, W - pad * 2, GxEPD_BLACK);
-    textAt(pad, H - 10, attention > 0 ? "BOOT  DECIDE" : "BOOT  HISTORY", CLASSIC_FONT);
-    textRight(W - pad, H - 10, "USER  HOME", CLASSIC_FONT);
 #endif
 }
 
@@ -2105,7 +2130,7 @@ void drawSearching(const Snap& s) {
     constexpr int16_t pad = 14;
     display.fillRect(0, 0, W, 7, accentColor());
     drawAgentDeckMark(pad, 13, 30);
-    textAt(54, 38, "AGENTDECK", &FreeSansBold12pt7b);
+    textAt(54, 38, "AgentDeck", &FreeSansBold12pt7b);
     textRight(W - pad, 35, "OFFLINE", CLASSIC_FONT);
     display.drawFastHLine(pad, 49, W - pad * 2, GxEPD_BLACK);
 
@@ -2348,7 +2373,11 @@ void init() {
     logHeap("lily-epd-touch");
 #endif
 #if defined(BOARD_NM_EPD_420)
-    display.epd2.selectFastFullUpdate(true);
+    // Keep the stock full-colour waveform. The driver's fast-full LUT forces a
+    // synthetic high-temperature profile; on the on-hand GDEY042Z98 that makes
+    // red weak and muddy. Refreshes are now coalesced at an ambient cadence, so
+    // pigment fidelity is worth the slower admitted cycle.
+    display.epd2.selectFastFullUpdate(false);
     lastPhysicalFace = renderFace;
     for (uint8_t i = 0; i < s.rowCount; i++) {
         const auto kind = AgentDeckEink::classifyStatus(s.rows[i].state);
@@ -2688,8 +2717,7 @@ void render() {
     }
     urgentTransition = urgentTransition || !physicalFaceReady ||
                        renderFace != lastPhysicalFace ||
-                       nmAttention != lastPhysicalAttention ||
-                       nmWorking != lastPhysicalWorking;
+                       nmAttention > lastPhysicalAttention;
 #endif
     if (!forceFull && !forceRefresh && !urgentTransition &&
         (now - lastDrawMs) < MIN_REFRESH_INTERVAL_MS) return;  // coalesce bursts

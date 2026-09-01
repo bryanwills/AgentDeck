@@ -167,7 +167,13 @@ static void networkTask(void* param) {
         // WiFi OTA.
         {
             uint32_t nowDj = millis();
-            if (!wifiJoinSuppressed && nowDj > 25000 && !Net::wifiConnected() &&
+            // This unit has a measured display+radio brownout history. USB is
+            // already the complete state transport, so do not add the radio's
+            // current spike while serial is healthy. If USB actually drops,
+            // serialConnected() expires and the next retry brings WiFi up as the
+            // fallback transport instead of rebooting a healthy USB session.
+            if (!wifiJoinSuppressed && nowDj > 25000 && !Net::serialConnected() &&
+                !Net::wifiConnected() &&
                 (lastDeferredJoinMs == 0 || (uint32_t)(nowDj - lastDeferredJoinMs) > 60000)) {
                 lastDeferredJoinMs = nowDj;
                 Net::wifiTryDeferredJoin();

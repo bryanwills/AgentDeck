@@ -653,9 +653,13 @@ actor ESP32Serial {
 
         // Send the initial burst only after the read loop is active so CDC
         // ports can drain the response path before larger payloads arrive.
+        // Do NOT send state here: device_info has not identified the board yet,
+        // so payload shaping is generic, and the response handler would send
+        // the same burst again. On T-Display Pro that double burst overruns the
+        // native CDC endpoint and the later 559-byte frame fails with ENXIO.
+        // handleReadData sends the one shaped snapshot after device_info.
         if let idx = connections.firstIndex(where: { $0.port == port }) {
             sendDeviceInfoRequest(to: &connections[idx])
-            sendInitialState(to: &connections[idx])
         }
         publishStatusShadow()
     }

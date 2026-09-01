@@ -1,17 +1,16 @@
 #if defined(BOARD_T_EMBED)
 
 #include "chime.h"
-#include "../../../boards/board_config.h"
+#include "../../audio/speaker_playback.h"
 
 #include <Arduino.h>
-#include <ESP_I2S.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <math.h>
 
 static volatile bool s_playing = false;
 
-static void writeTone(I2SClass& i2s, float freqHz, uint32_t ms, uint16_t amplitude) {
+static void feedTone(float freqHz, uint32_t ms, uint16_t amplitude) {
     constexpr uint32_t RATE = 16000;
     const uint32_t total = RATE * ms / 1000;
     int16_t buf[256];
@@ -31,20 +30,26 @@ static void writeTone(I2SClass& i2s, float freqHz, uint32_t ms, uint16_t amplitu
             phase += step;
             if (phase > 2.0f * (float)M_PI) phase -= 2.0f * (float)M_PI;
         }
-        i2s.write((uint8_t*)buf, n * sizeof(int16_t));
+        if (!Audio::playbackFeed((const uint8_t*)buf, n * sizeof(int16_t))) break;
         written += n;
     }
 }
 
 static void chimeTask(void* param) {
     (void)param;
-    I2SClass i2s;
-    i2s.setPins(BOARD_PIN_SPK_BCLK, BOARD_PIN_SPK_LRCLK, BOARD_PIN_SPK_DIN, -1, -1);
-    if (i2s.begin(I2S_MODE_STD, 16000, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO)) {
-        // Two-note rising chime, quiet enough for a desk (amp ≈ 18% FS).
-        writeTone(i2s, 880.0f, 110, 6000);
-        writeTone(i2s, 1318.5f, 140, 6000);
-        i2s.end();
+    // The streamed speaker transport owns T-Embed's I2S channel for the whole
+    // boot. Creating another I2SClass here tears that owner down (or claims the
+    // S3's last controller while the PDM mic owns the other one), leaving the
+    // amplifier clocking garbage after an OpenClaw attention edge. Feed the
+    // generated notes through the one shared owner instead.
+    if (!Audio::playbackActive()) {
+        Audio::playbackBegin(16000);
+        if (Audio::playbackActive()) {
+            // Two-note rising chime, quiet enough for a desk (amp ≈ 18% FS).
+            feedTone(880.0f, 110, 6000);
+            feedTone(1318.5f, 140, 6000);
+            Audio::playbackEnd();
+        }
     }
     s_playing = false;
     vTaskDelete(nullptr);
@@ -53,7 +58,7 @@ static void chimeTask(void* param) {
 namespace Chime {
 
 void playAttention() {
-    if (s_playing) return;  // coalesce overlapping requests
+    if (s_playing || Audio::playbackActive()) return;  // coalesce; never interrupt speech
     s_playing = true;
     if (xTaskCreate(chimeTask, "chime", 4096, nullptr, 1, nullptr) != pdPASS) {
         s_playing = false;

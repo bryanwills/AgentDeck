@@ -265,6 +265,12 @@ void serialLoop() {
 
                 // Only parse lines that look like JSON objects
                 if (serialBuf[0] == '{') {
+                    // parseMessage() answers an explicit device_info_request.
+                    // Remember that before parsing so first-contact discovery
+                    // does not append a second 800-byte device_info frame to a
+                    // native USB CDC endpoint with a small TX FIFO.
+                    const bool requestedDeviceInfo =
+                        strstr(serialBuf, "\"device_info_request\"") != nullptr;
                     Protocol::parseMessage(serialBuf, serialBufPos);
                     uint32_t nowMs = millis();
                     lastSerialJsonMs = nowMs;
@@ -285,7 +291,7 @@ void serialLoop() {
                     // Send device info on first bridge JSON contact
                     if (!deviceInfoSent) {
                         deviceInfoSent = true;
-                        sendDeviceInfoSerial();
+                        if (!requestedDeviceInfo) sendDeviceInfoSerial();
                     }
 
                     // Ack ONLY keepalives — acking every inbound JSON meant the
