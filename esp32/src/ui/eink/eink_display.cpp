@@ -1594,20 +1594,24 @@ void drawEp47Footer(const Snap& s) {
     // timeline rows, and the one capability hint that changes what a user
     // does with their hands. The first row shares its width with that hint;
     // the second gets the full span.
-    // Full ink and 12pt: the footer is read from across a desk, and the muted
-    // gray body ink that works for in-card captions was illegible here.
+    // Full ink, bold, and honest metrics. The band is 62px on a 540px panel:
+    // two 12pt lines measured as overlapping (Korean glyphs run taller than
+    // the Latin ascent) with the second line's descenders touching the panel
+    // edge. Bold 9pt in full black is the same weight the QUEUE state column
+    // reads at across a desk, and two lines of it fit with real gaps —
+    // baselines 498/520 leave the rule (478) and the edge (540) alone.
     const uint8_t tickerLines = s.tickerCount > 1 ? 2 : s.tickerCount;
     for (uint8_t ti = 0; ti < tickerLines; ti++) {
         char event[116];
-        const int16_t lineY = y + 12 + (int16_t)ti * 26;
+        const int16_t lineY = y + 6 + (int16_t)ti * 22;
         smartFitText(event, sizeof(event), s.tickerText[ti],
-                     ti == 0 ? 640 : (int16_t)(W - 40), &FreeSansBold12pt7b);
-        smartTextAt(20, lineY, event, &FreeSansBold12pt7b);
+                     ti == 0 ? 660 : (int16_t)(W - 40), &FreeSansBold9pt7b);
+        smartTextAt(20, lineY, event, &FreeSansBold9pt7b);
     }
     if (!epd47TouchAvailable()) {
-        textRight(W - 20, y + 12, "TOUCH OFF  |  GPIO21 NEXT", CLASSIC_FONT);
+        textRight(W - 20, y + 6, "TOUCH OFF  |  GPIO21 NEXT", CLASSIC_FONT);
     } else if (s.agPlan[0]) {
-        textRight(W - 20, y + 12, s.agPlan, CLASSIC_FONT);
+        textRight(W - 20, y + 6, s.agPlan, CLASSIC_FONT);
     }
 }
 
