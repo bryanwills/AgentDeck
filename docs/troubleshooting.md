@@ -17,6 +17,7 @@
 | Android shows "Not Connected" | Bridge not reachable | Verify same LAN; for USB: `adb reverse tcp:9120 tcp:9120` then connect to 127.0.0.1:9120 |
 | E-ink ghosting on Crema | Missing full GC16 refresh | State transitions trigger full refresh automatically; force refresh by toggling bridge connection |
 | `posix_spawnp failed` | On macOS, old installs may have a non-executable node-pty `spawn-helper`; otherwise the native prebuild may be incompatible | Current AgentDeck repairs the helper mode on first use. Reinstall with `npx @agentdeck/setup`; only if it still fails, run `cd $(npm root -g)/@agentdeck/bridge/node_modules/node-pty && npx node-gyp rebuild` |
+| OpenClaw row flips to "gateway not found" and back; timeline shows `OpenClaw Gateway unstable · N restarts in M min` | The Gateway process itself is restarting — the daemon only mirrors it. Measured cause on 2026-09-02: two OpenClaw installs (a global npm/pnpm copy beside the app-managed `~/.openclaw/tools` runtime) fighting over `~/.openclaw/state`, with launchd KeepAlive respawning the loser | Read the reason the daemon attached (`/health` → `gatewayInstability.diagnosis`, from `~/Library/Logs/openclaw/gateway.log`). If it says *another Gateway owns that state directory*: keep one install, remove the rest (`npm uninstall -g openclaw`, `pnpm remove -g openclaw`), and make sure `openclaw` on PATH resolves to `~/.openclaw/bin/openclaw` — a stray global CLI running `gateway install` re-points the launchd service at itself and recreates the fight |
 
 ## tmux -CC Compatibility
 
