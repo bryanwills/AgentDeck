@@ -41,9 +41,11 @@ bumped, superseded by 1.0.17, and never published, so it exists only in git.
 ## 2026-09-02 — Ulanzi 1.2.0
 
 Version note: Ulanzi jumps from 1.0.5 to 1.2.0 to rejoin the round's shared
-minor — one number across every channel of this cut. The 1.0.4 Marketplace
-review submission is abandoned in favor of this version; 1.0.5 was tagged but
-never submitted, so 1.2.0 is the next thing the store sees after 1.0.3.
+minor — one number across every channel of this cut. The Marketplace's pending
+review record (submitted as 1.0.4, later replaced in review by 1.0.5 — the
+portal's own update note said so, against what this repo had recorded) is
+superseded by this version; the store's published version remains 1.0.3, so
+1.2.0 is the next thing its users see.
 
 ### OFFLINE means the daemon is unreachable, and nothing else
 

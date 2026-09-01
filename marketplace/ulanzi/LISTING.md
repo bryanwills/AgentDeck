@@ -10,7 +10,7 @@ content-record mismatch reported in the original support thread with the
 reproduction URL and AgentDeck UUID/category. **Resolved:** the published record
 is `/contentView/1141` and resolves to AgentDeck.
 
-## 1.2.0 — the aggregate resubmission (2026-09-02, prepared)
+## 1.2.0 — the aggregate resubmission (2026-09-02, submitted)
 
 The store last saw 1.0.3, so this submission carries everything since: the
 1.0.4 content (D200X keypad, Kiro/Kiro IDE/Antigravity marks, answerable
@@ -22,14 +22,24 @@ archive from ~20 MB to ~1.4 MB), and the 1.2.0 behavior changes (OFFLINE
 selected only on a real transport disconnect; usage keys compact same-provider
 5H+7D windows instead of dropping a limit).
 
-Portal procedure: **withdraw the pending 1.0.4 review version first**, then
-*Create review version* against the published 1.0.3 with the 1.2.0 ZIP. The
-form prefills Version `1.2.0` from the manifest and re-selects every supported
-device including `Dial` — deselect `Dial` and the D200X encoders again (the
-plugin claims no encoder support). Metadata, seven-language Summary / Detailed
-introduction, compatibility matrix, and media all carry over from the 1.0.4
-submission unchanged (see those sections below); only the version number and
-the update note are new.
+**What the portal actually held (measured 2026-09-02, against this file's
+record):** the pending review record's update note was the *1.0.5* text — so
+1.0.5 HAD been submitted at some point, replacing the 1.0.4 review version,
+and this file's "1.0.4 under review" was one version stale. A review record is
+edited in place, not withdrawn: the pencil on the *Works under review* card
+opens **Edit review work** ("saving updates this review record"), which is the
+supersede path — the trash next to it deletes, and is not how an update is
+made.
+
+**Submitted 2026-09-02 via Edit review work**, replacing the pending record
+with 1.2.0: new ZIP (form prefilled Version `1.2.0` from the manifest and
+confirmed "Plugin manifest parsed"), `Dial` deselected again (the form
+re-selects every device on ZIP parse, exactly as it did for 1.0.4), all seven
+language Summary / Detailed introduction pairs re-entered from this file's
+canonical sections (the ZIP re-parse had reset them to one-line manifest
+text), and the update note below (997/1000). Portal confirmed with a "Review
+work updated" toast; the card now shows the 1.2.0 note. Published 1.0.3 keeps
+serving while 1.2.0 is reviewed.
 
 ### Update note (portal field, one per submission)
 
@@ -45,14 +55,14 @@ OFFLINE now means only "the daemon is unreachable" — an idle daemon with no ac
 German, Spanish and Portuguese localization added; Traditional Chinese corrected. Still a thin client: no bundled daemon, no USB HID access, no analytics.
 ```
 
-## 1.0.4 — the catch-up submission (2026-08-24, submitted; abandoned 2026-09-02)
+## 1.0.4 — the catch-up submission (2026-08-24, submitted; superseded 2026-09-02)
 
-**Abandoned 2026-09-02**: review time outlasted two further versions (1.0.5 was
-tagged but never submitted; 1.2.0 is cut with the shared round), so the pending
-1.0.4 review version is to be withdrawn in the portal and replaced by a fresh
-*Create review version* carrying 1.2.0. Everything below records the 1.0.4
-submission as it was made — the form mechanics and field limits still apply to
-the 1.2.0 submission.
+**Superseded 2026-09-02**: review time outlasted two further versions, and the
+portal shows the pending record had already been replaced in review by 1.0.5
+at some point this file never recorded. On 2026-09-02 the pending record was
+edited in place to 1.2.0 (see the 1.2.0 section above). Everything below
+records the 1.0.4 submission as it was made — the form mechanics and field
+limits applied unchanged to the 1.2.0 submission.
 
 **Submitted 2026-08-24** as a *Create review version* against the published
 1.0.3. Verified after the press, both halves: Personal Center reads
