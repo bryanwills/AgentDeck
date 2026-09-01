@@ -7,15 +7,15 @@ locale: en
 canonical: true
 status: required
 owner: Apple release maintainers
-reviewed: 2026-08-28
-revision: 2026-08-28
+reviewed: 2026-09-02
+revision: 2026-09-02
 source_of_truth: apple/APP_REVIEW_NOTES.md
 validators: [bash apple/scripts/verify-appstore-archive.sh]
 ---
 
 # AgentDeck Dashboard — App Review Notes
 
-**Release status** (verified from Apple's public platform pages, 2026-08-12): `1.0.5` is live on both platforms at [AgentDeck Dashboard](https://apps.apple.com/app/id6784822497) — macOS build **4701** and iPhone/iPad build **4702**. The first iPhone/iPad submission, 1.0.2 (3901), was rejected on 2026-08-04 under Guideline 2.1(a); build 4002 carried the fix plus an offline Device Preview entry point and was released on 2026-08-06.
+**Release status** (verified from the store's own records, 2026-08-22): `1.0.8` is live on both platforms at [AgentDeck Dashboard](https://apps.apple.com/app/id6784822497) — build **5301**, iPhone/iPad released 2026-08-22T18:41Z and macOS within the same window. The first iPhone/iPad submission, 1.0.2 (3901), was rejected on 2026-08-04 under Guideline 2.1(a); build 4002 carried the fix plus an offline Device Preview entry point and was released on 2026-08-06. `apple-v1.1.0` produced no build (CI outage window); its content ships in 1.2.0.
 
 _Paste the relevant sections into App Store Connect's "Notes" field when submitting `apple-v<version>`._
 
@@ -51,6 +51,7 @@ AgentDeck Dashboard requires `com.apple.security.network.server`. The app is not
 - Binding is limited to loopback and the local network interfaces. The app opens no firewall rules, performs no port mapping/UPnP, and accepts no traffic from the public internet.
 - Endpoints are read-only dashboard reads plus the local hook POST endpoint.
 - Connections from outside the machine must be paired (the iOS companion pairs via a QR code / auth token shown on the Mac). This is enforced at the socket layer: a non-local WebSocket upgrade without the pairing token is rejected with 401, non-local HTTP requests without the token are denied except a minimal `GET /health` that carries no credentials or session data, and the Bonjour TXT record never contains the token.
+- Since 1.2.0 a refused device additionally surfaces as a pending entry in the Mac's **Pair a Device** window, where the user may approve that specific device. Approval is granted on the Mac by the user and scoped to the one device (its random per-install id, or its address for devices that predate the id header); it mints no credential, opens no new endpoint, and a device can never approve itself. The default with no user action remains refusal.
 - The learning pack is a non-executable signed-bundle resource. Before serving it, the Swift daemon verifies its CC BY-SA 4.0 source ledger and attribution, transfer MD5, fixed-format header checksum, and payload SHA-256. It reads no external file and starts no process.
 
 **How to verify during review.** Launch the app, then open Settings → Port to see the active listening port (9120 by default), and use "Pair iPad" in the menu bar to display the pairing QR code the iOS companion scans to connect inbound. With the app running, `lsof -nP -iTCP -sTCP:LISTEN | grep AgentDeck` shows the AgentDeck process listening on it.

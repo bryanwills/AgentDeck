@@ -209,6 +209,14 @@ Full build-from-source and manual steps: **[docs/install.md](docs/install.md)**.
 <td><b>Android e-ink</b> — reader-specific layouts with partial refresh</td>
 </tr>
 <tr>
+<td><img src="docs/media/epd47.jpg" alt="LilyGo EPD47 4.7-inch grayscale e-ink panel showing the AgentDeck queue roster with usage gauges"></td>
+<td><img src="docs/media/nm-epd-420.jpg" alt="RockBase NM-EPD-420 4.2-inch tri-color e-ink panel showing the AgentDeck glance face"></td>
+</tr>
+<tr>
+<td><b>EPD47 e-ink</b> — 4.7" 960×540 grayscale with touch, quiet differential repaints</td>
+<td><b>NM-EPD-420 e-ink</b> — 4.2" tri-color glance; red ink is spent only on attention</td>
+</tr>
+<tr>
 <td><img src="docs/media/ipad.jpg" alt="iPad running the SwiftUI AgentDeck dashboard with the aquarium terrarium"></td>
 <td><img src="docs/media/pixoo64.jpg" alt="Pixoo64 64x64 LED matrix showing pixel-art agent creatures"></td>
 </tr>
@@ -343,6 +351,22 @@ delivery tags advance independently. A minor adds substantial backward-compatibl
 features, while a patch carries small fixes. Root [`VERSION`](VERSION) anchors
 the compatibility major but is not a minor/patch ceiling — policy in [RELEASING.md](RELEASING.md),
 builds on [Releases](https://github.com/puritysb/AgentDeck/releases).
+
+### Version compatibility at a glance
+
+Any two numeric `X.Y.Z` artifacts are mutually compatible exactly when their
+major `X` matches — a 1.0 device keeps working against a 1.2 daemon and vice
+versa. The table records each artifact's version in the current coordinated
+cut; matching minors are a coincidence of this round, never a requirement.
+
+| Artifact | Current cut | Connects to |
+|---|---|---|
+| npm CLI + daemon (`@agentdeck/*`) | 1.2.0 | — (the hub every client dials) |
+| Apple app (macOS · iPhone/iPad) | 1.2.0 | its built-in Swift daemon, or any 1.x daemon |
+| Android app | 1.2.0 | any 1.x daemon |
+| Stream Deck plugin | 1.2.0 | any 1.x daemon |
+| Ulanzi D200H/D200X plugin | 1.2.0 | any 1.x daemon |
+| ESP32 firmware (12 boards) | 1.2.0 | any 1.x daemon (serial or Wi-Fi) |
 
 | Channel | Tag | Status |
 |---|---|---|

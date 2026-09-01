@@ -10,6 +10,41 @@ content-record mismatch reported in the original support thread with the
 reproduction URL and AgentDeck UUID/category. **Resolved:** the published record
 is `/contentView/1141` and resolves to AgentDeck.
 
+## 1.2.0 — the aggregate resubmission (2026-09-02, prepared)
+
+The store last saw 1.0.3, so this submission carries everything since: the
+1.0.4 content (D200X keypad, Kiro/Kiro IDE/Antigravity marks, answerable
+OpenClaw approval, de/es/pt locales, `AI` sub-category, refreshed media), the
+1.0.5 packaging change (no native binary — the rasterizer is
+`@resvg/resvg-wasm`, which removes the exact unsigned `.node` module the
+Ulanzi Studio team reported Gatekeeper flagging on 2026-08-25, and shrinks the
+archive from ~20 MB to ~1.4 MB), and the 1.2.0 behavior changes (OFFLINE
+selected only on a real transport disconnect; usage keys compact same-provider
+5H+7D windows instead of dropping a limit).
+
+Portal procedure: **withdraw the pending 1.0.4 review version first**, then
+*Create review version* against the published 1.0.3 with the 1.2.0 ZIP. The
+form prefills Version `1.2.0` from the manifest and re-selects every supported
+device including `Dial` — deselect `Dial` and the D200X encoders again (the
+plugin claims no encoder support). Metadata, seven-language Summary / Detailed
+introduction, compatibility matrix, and media all carry over from the 1.0.4
+submission unchanged (see those sections below); only the version number and
+the update note are new.
+
+### Update note (portal field, one per submission)
+
+```
+1.2.0 replaces the 1.0.4 review submission and carries everything since 1.0.3.
+
+New devices and agents: the D200X's 14 LCD keys run the same session UI as the D200H (its rotary encoders stay unclaimed — they need their own action). Kiro, Kiro IDE and Antigravity sessions draw with their own marks, and an OpenClaw permission prompt can be answered from the key, not just read.
+
+No native binary any more: the SVG rasterizer is now WebAssembly, one file identical on every OS and CPU. This removes the unsigned .node module macOS Gatekeeper flagged in earlier archives, and shrinks the bundle from ~20 MB to ~1.4 MB.
+
+OFFLINE now means only "the daemon is unreachable" — an idle daemon with no active session no longer draws the dark offline card. Usage keys follow the account's real limit windows: 5h+7d pairs share one key instead of dropping a limit.
+
+German, Spanish and Portuguese localization added; Traditional Chinese corrected. Still a thin client: no bundled daemon, no USB HID access, no analytics.
+```
+
 ## 1.0.4 — the catch-up submission (2026-08-24, submitted; abandoned 2026-09-02)
 
 **Abandoned 2026-09-02**: review time outlasted two further versions (1.0.5 was
