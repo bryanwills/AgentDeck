@@ -10,7 +10,14 @@ content-record mismatch reported in the original support thread with the
 reproduction URL and AgentDeck UUID/category. **Resolved:** the published record
 is `/contentView/1141` and resolves to AgentDeck.
 
-## 1.0.4 — the catch-up submission (2026-08-24, submitted)
+## 1.0.4 — the catch-up submission (2026-08-24, submitted; abandoned 2026-09-02)
+
+**Abandoned 2026-09-02**: review time outlasted two further versions (1.0.5 was
+tagged but never submitted; 1.2.0 is cut with the shared round), so the pending
+1.0.4 review version is to be withdrawn in the portal and replaced by a fresh
+*Create review version* carrying 1.2.0. Everything below records the 1.0.4
+submission as it was made — the form mechanics and field limits still apply to
+the 1.2.0 submission.
 
 **Submitted 2026-08-24** as a *Create review version* against the published
 1.0.3. Verified after the press, both halves: Personal Center reads

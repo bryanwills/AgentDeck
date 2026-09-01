@@ -38,6 +38,30 @@ file's own rule forbids reconstructing its notes. The commit above is the
 record. `npm 1.0.16` (`37c674b8`) is a different case and needs nothing — it was
 bumped, superseded by 1.0.17, and never published, so it exists only in git.
 
+## 2026-09-02 — Ulanzi 1.2.0
+
+Version note: Ulanzi jumps from 1.0.5 to 1.2.0 to rejoin the round's shared
+minor — one number across every channel of this cut. The 1.0.4 Marketplace
+review submission is abandoned in favor of this version; 1.0.5 was tagged but
+never submitted, so 1.2.0 is the next thing the store sees after 1.0.3.
+
+### OFFLINE means the daemon is unreachable, and nothing else
+
+The daemon's aggregate `state:'disconnected'` also means "connected, but no
+active session", so it was never sufficient to select the OFFLINE surface — a
+healthy daemon waiting for work drew the same dark card as a dead socket. The
+plugin now carries its own transport fact (`daemonConnected`) beside the
+daemon's state, and only a real disconnect selects OFFLINE. The tutorial copy
+follows in all nine locales: before setup, every key forms one dark OFFLINE
+card, which is the plugin telling you the daemon is the missing piece.
+
+### Usage keys follow the account's real windows
+
+The bundled layout engine picks up the Codex limits work: the D200H has three
+usage keys left of its clock, so when an account exposes four or five rolling
+windows, same-provider 5H+7D pairs compact into one dual-readout key instead
+of dropping a limit, and a scoped per-model cap contributes at most one tile.
+
 ## 2026-09-01 — Apple 1.2.0
 
 ### A device is approved by the operator, not by a code it cannot type
@@ -116,7 +140,9 @@ session that needs you) instead of a permanent rail — the tri-color waveform i
 already paid for on every repaint, so it costs nothing extra. The ambient floor
 is 15 minutes with coarse-fact transitions (attention/working counts, link
 state) bypassing it, because 100% of this board's repaints are full tri-color
-cycles (measured 93/93). The speaker was configured correctly all along and set
+cycles (measured 93/93). A changed working count bypasses only once it has
+held for 90 seconds — the glance face's whole content is these counts, so a
+settled change repaints while between-turns flapping stays coalesced. The speaker was configured correctly all along and set
 18 dB too quiet.
 
 ### The paper says less, and what it says is legible
@@ -157,9 +183,10 @@ print, not as fading.
 
 The EPD47 queue shows the whole roster — attention, then working, then idle —
 instead of only active sessions, which had the largest panel in the fleet
-showing the fewest rows; its footer timeline renders in full ink at 12pt,
-because the muted caption gray that works inside a card was illegible from
-across a desk.
+showing the fewest rows; its footer timeline renders two lines of bold 9pt in
+full ink, because the muted caption gray that works inside a card was illegible
+from across a desk, and a 12pt budget measured from the Latin ascent overlapped
+and clipped the Korean glyphs the ticker actually draws.
 
 ### Surface modes and pull-aware paper faces
 
