@@ -38,7 +38,92 @@ file's own rule forbids reconstructing its notes. The commit above is the
 record. `npm 1.0.16` (`37c674b8`) is a different case and needs nothing — it was
 bumped, superseded by 1.0.17, and never published, so it exists only in git.
 
-## 2026-09-01 — Android 1.0.13
+## 2026-09-01 — Apple 1.2.0
+
+### A device is approved by the operator, not by a code it cannot type
+
+A reader with no camera and no cable used to have no way in: the daemon refused
+its WebSocket at the handshake and logged the address, and nothing told anyone.
+That refusal is now a prompt — the Pair a Device window shows WAITING TO
+CONNECT with each knocking device, and the operator approves or dismisses it.
+The device does nothing at all, which is also the stronger trust model: a code
+trusts whoever knows a secret, an approval trusts a peer the operator pointed
+at, and an attacker cannot approve themselves.
+
+Identity is the device's random per-install id when it sends one, and the
+address only when it does not — devices that predate the header keep working,
+and the UI labels which kind a grant is, because only the device-scoped one
+survives a DHCP lease change. A refused device is pointed at this approval flow
+instead of at a CLI command its user may not have.
+
+### Epoch milliseconds on the wire are integers
+
+The Swift daemon wrote the subagent census timestamp as a raw
+`timeIntervalSince1970 * 1000`, so the wire carried `1788214664925.6821` —
+and Android's strict decoder refused the whole `sessions_list` frame for it,
+blanking the roster on any machine with a finished subagent. The producer now
+emits integer epoch-ms everywhere (Android 1.2.0 carries the tolerant-decode
+half of the same fix).
+
+## 2026-09-01 — ESP32 1.2.0
+
+### Two e-ink boards join the fleet
+
+LilyGo T5 ePaper S3 (EPD47: 4.7″ 960×540, 16-level grayscale, GT911 touch) and
+RockBase NM-EPD-420 (4.2″ tri-color) are now first-class boards with merged
+factory images in the release matrix.
+
+### EPD47: erase what was drawn, not the whole panel
+
+The parallel driver assumes a white surface, and a "full" cycle used to mean a
+whole-panel clear — several black/white inversions, so one tab press read as a
+storm of flashes. The firmware now retains the previous 4-bit frame in PSRAM
+and drives exactly that ink back to paper before each replacement, with a hard
+anti-ghost sweep after four differential erases or ten minutes. The canvas also
+stopped collapsing 16 grayscale levels to two, tab selection is arbitrated with
+hysteresis so a jittery session count cannot thrash pages, and the touch grammar
+drops the numeric prefixes that existed for the single-button cycle.
+
+### NM-EPD-420: red is semantic, and the speaker was 18 dB too quiet
+
+Red ink is spent on the one thing that needs attention (a decision face, a
+session that needs you) instead of a permanent rail — the tri-color waveform is
+already paid for on every repaint, so it costs nothing extra. The ambient floor
+is 15 minutes with coarse-fact transitions (attention/working counts, link
+state) bypassing it, because 100% of this board's repaints are full tri-color
+cycles (measured 93/93). The speaker was configured correctly all along and set
+18 dB too quiet.
+
+### Surface modes and pull-aware paper faces
+
+Offline, sleeping, live, and interactive states are explicit surface modes with
+refresh counters, instead of being inferred from whichever transport last
+spoke; pull-aware paper faces serve XTEink and InkDeck-class readers, and panel
+rotation/refresh policy is aligned with the first-party previews.
+
+## 2026-09-01 — Stream Deck 1.2.0
+
+### The Codex dial follows the windows the account actually exposes
+
+The usage surfaces assumed the 5h rolling window was gone forever (it
+disappeared upstream on 2026-07-12) and hardcoded that shape. Codex Plus
+re-exposed it. The window list now follows what the account reports — Plus can
+show 5h and 7d, Pro shows 7d alone — and a lone window fills the vacant half
+with the subscription behind the quota instead of a dim "—" ghost.
+
+### An approval key names what it approves, and why
+
+Approval questions are usually shell commands, and an 18-character head cut
+kept the verb every request shares while dropping the object that identifies
+this one. Keys now summarize the question so the object survives, and show the
+reason approval was demanded — the difference between "approve a sed" and
+"approve a sed that policy flagged".
+
+## 2026-09-01 — Android 1.2.0
+
+Android's previous delivery is 1.0.10; the 1.0.12/1.0.13 numbers below were
+prepared but never tagged or shipped, so their content ships here, renumbered to
+join the coordinated 1.2.0 round. versionCode stays 15.
 
 ### One fractional timestamp emptied the whole session list
 
@@ -66,8 +151,6 @@ daemon rather than composed from the decoder's own field list — a fixture buil
 from what the reader expects agrees with it forever and cannot catch a producer
 emitting a shape the reader refuses, which is how this survived until a device
 was looked at.
-
-## 2026-08-31 — Android 1.0.12
 
 ### A device is approved as itself, and a focused session gets its creature back
 
