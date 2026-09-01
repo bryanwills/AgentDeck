@@ -2,9 +2,22 @@
 
 > **Live since 2026-07-28.** The product page is at
 > <https://marketplace.elgato.com/product/agentdeck-dce3806b-176e-40f2-be7d-e029bec0f464>,
-> and the current published version is `1.0.4` (2026-08-05), after `1.0.2` (2026-07-28)
-> and `1.0.3` (2026-07-31).
+> and the current published version is `1.0.6` (2026-08-18, measured from the
+> product page's own payload), after `1.0.4` (2026-08-05), `1.0.3` (2026-07-31)
+> and `1.0.2` (2026-07-28).
 > This file stays the source of the listing copy and asset inventory for future revisions.
+
+## 1.2.0 submission (2026-09-02, prepared)
+
+Manifest version `1.2.0.0`, artifact `bound.serendipity.agentdeck.streamDeckPlugin`
+from the `streamdeck-v1.2.0` GitHub Release (same bytes as `pnpm package`).
+Upload with "publish after review" unselected and verify the DRM-processed
+build's four encoders through the review loop before going live
+(docs/streamdeck-layout.md). Version-notes copy for the console:
+
+```
+1.2.0 — Codex usage dial follows the windows the account actually exposes: Plus shows 5h and 7d, Pro shows 7d alone, and a lone window fills the vacant half with the subscription name instead of a dim placeholder. Approval keys now summarize the question so the object of a shell command survives truncation, and show the reason approval was demanded.
+```
 
 Submission target: **https://maker.elgato.com** (Maker Console → Publish).
 
