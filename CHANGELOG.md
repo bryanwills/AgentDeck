@@ -56,6 +56,18 @@ and the UI labels which kind a grant is, because only the device-scoped one
 survives a DHCP lease change. A refused device is pointed at this approval flow
 instead of at a CLI command its user may not have.
 
+### Desktop Codex wears its own badge on the Mac daemon too
+
+Codex Desktop fires the same lifecycle hooks as the TUI, and the Swift daemon
+stamped every session `codex-cli` — while the Node daemon reads the rollout's
+`session_meta.originator` and labels `codex-app`, so the same session wore a
+different badge depending on which daemon owned the port. The Swift daemon now
+reads the rollout head the same way (measured originators: "Codex Desktop"
+vs "codex-tui"/"codex_cli_rs"/"codex_vscode"). The never-functional process
+observer for the desktop app is deleted: it guarded on a bundle path the
+shipped app does not use, matched zero processes in its whole life, and
+reviving it would double-report sessions the hooks already push.
+
 ### The Mac daemon advertises the identity both daemons agreed on
 
 The Swift daemon's Bonjour advertisement was a hand-typed literal —

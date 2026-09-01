@@ -1,7 +1,7 @@
 #if os(macOS)
 // ProcessEnumerator.swift — sandbox-safe process metadata enumeration.
 //
-// Shared sysctl helper for passive observers (LocalCodexAppObserver,
+// Shared sysctl helper for passive observers (LocalKiroObserver,
 // OpenCodeObserver). Reads the kernel process table via
 // `sysctl(KERN_PROC_ALL)` and per-process argv via `sysctl(KERN_PROCARGS2)`
 // — no `ps`, no `Process()`, no helper binaries, so it stays inside the

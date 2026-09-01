@@ -352,6 +352,33 @@ enum CodexRolloutResponseReader {
         return lastAgentMessage
     }
 
+    private static let headBytes = 8 * 1024
+
+    /// Whether the rollout's `session_meta` names a desktop originator.
+    ///
+    /// The rollout's FIRST line is `session_meta`, and `payload.originator`
+    /// names the process that opened the session — measured values on a real
+    /// store: "Codex Desktop", "codex-tui", "codex_cli_rs", "codex_vscode",
+    /// "codex_exec". The predicate mirrors the Node daemon's
+    /// (`bridge/src/hook-codex-sessions.ts`): case-insensitive contains
+    /// "desktop". `nil` means "could not read", never "not desktop" — the
+    /// caller retries later rather than caching a guess.
+    static func originatorIsDesktop(sessionId: String, sessionsRoot: URL? = nil) -> Bool? {
+        guard let file = locateRollout(sessionId: sessionId, sessionsRoot: sessionsRoot),
+              let handle = try? FileHandle(forReadingFrom: file) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: headBytes), !data.isEmpty else { return nil }
+        let lineData = data.prefix(while: { $0 != 0x0A })
+        // No newline inside the window and the window is full: the first line
+        // is truncated mid-JSON, so make no claim rather than parse a prefix.
+        if lineData.count == data.count, data.count == headBytes { return nil }
+        guard let record = try? JSONSerialization.jsonObject(with: Data(lineData)) as? [String: Any],
+              record["type"] as? String == "session_meta",
+              let payload = record["payload"] as? [String: Any],
+              let originator = payload["originator"] as? String else { return nil }
+        return originator.lowercased().contains("desktop")
+    }
+
     static func locateRollout(sessionId: String, sessionsRoot: URL? = nil) -> URL? {
         let normalized = sessionId.hasPrefix("codex:")
             ? String(sessionId.dropFirst("codex:".count))
@@ -1360,6 +1387,41 @@ final class DaemonServer {
     nonisolated private static let codexCliAgentType = "codex-cli"
     nonisolated private static let codexAppAgentType = "codex-app"
     nonisolated private static let codexAppFallbackProjectName = "Codex App"
+
+    /// Desktop-vs-TUI verdicts per hook session id, from the rollout head's
+    /// `session_meta.originator`. The head is written once at session open and
+    /// never changes, so a verdict caches forever; a MISS (rollout not located
+    /// yet, or a truncated first line) is retried, but not on every tool event
+    /// of a busy turn — locateRollout walks day directories.
+    private var codexDesktopBySession: [String: Bool] = [:]
+    private var codexOriginatorMissAt: [String: Double] = [:]
+    private static let codexOriginatorRetrySeconds: Double = 60
+
+    /// The agent type a hook-observed Codex session row should carry.
+    ///
+    /// Codex Desktop fires the same `codex_*` lifecycle hooks as the TUI, and
+    /// this daemon stamped every one of them `codex-cli` — while the Node
+    /// daemon reads `session_meta.originator` and labels `codex-app`
+    /// (`bridge/src/hook-codex-sessions.ts`), so the same session wore a
+    /// different badge depending on which daemon owned the port. Timeline
+    /// rows stay `codex-cli` on both daemons; only the session row is scoped.
+    private func codexObservedAgentType(sessionId: String) -> String {
+        if let desktop = codexDesktopBySession[sessionId] {
+            return desktop ? Self.codexAppAgentType : Self.codexCliAgentType
+        }
+        let now = Date().timeIntervalSince1970
+        if let missedAt = codexOriginatorMissAt[sessionId],
+           now - missedAt < Self.codexOriginatorRetrySeconds {
+            return Self.codexCliAgentType
+        }
+        if let desktop = CodexRolloutResponseReader.originatorIsDesktop(sessionId: sessionId) {
+            codexDesktopBySession[sessionId] = desktop
+            codexOriginatorMissAt.removeValue(forKey: sessionId)
+            return desktop ? Self.codexAppAgentType : Self.codexCliAgentType
+        }
+        codexOriginatorMissAt[sessionId] = now
+        return Self.codexCliAgentType
+    }
 
     /// Session id of the most recent hook event that carried one. Used to
     /// stamp state_update broadcasts so dashboard clients can attribute
@@ -5055,7 +5117,7 @@ final class DaemonServer {
             // the matching agentType so creature renderers downstream
             // (Pixoo, D200H, Terrarium, SessionListPanel) pick the Codex
             // brand instead of mis-painting them as Claude Code.
-            let resurrectedAgentType = isCodexEvent ? "codex-cli"
+            let resurrectedAgentType = isCodexEvent ? codexObservedAgentType(sessionId: sessionId)
                 : isOpenCodeEvent ? "opencode"
                 : "claude-code"
             let resurrectedProjectName = Self.nonEmptyString(ProjectNameResolver.projectName(fromHookPayload: json))
@@ -5119,6 +5181,7 @@ final class DaemonServer {
             let projectName = ProjectNameResolver.projectName(fromHookPayload: json)
             if !projectName.isEmpty { stateMachine.projectName = projectName }
             if let sessionId {
+                let codexAgentType = codexObservedAgentType(sessionId: sessionId)
                 var entry: DaemonSessionEntry
                 if let existing = pushedSessionsById[sessionId] {
                     entry = existing.projectName.isEmpty && !projectName.isEmpty
@@ -5127,7 +5190,7 @@ final class DaemonServer {
                             port: existing.port,
                             pid: existing.pid,
                             projectName: projectName,
-                            agentType: "codex-cli",
+                            agentType: codexAgentType,
                             tmuxSession: existing.tmuxSession,
                             tty: existing.tty,
                             parentTty: existing.parentTty,
@@ -5140,14 +5203,14 @@ final class DaemonServer {
                         port: Int(port),
                         pid: 0,
                         projectName: projectName,
-                        agentType: "codex-cli",
+                        agentType: codexAgentType,
                         tmuxSession: nil,
                         tty: nil,
                         parentTty: nil,
                         startedAt: ISO8601DateFormatter().string(from: Date())
                     )
                 }
-                entry.agentType = "codex-cli"
+                entry.agentType = codexAgentType
                 entry.state = "idle"
                 entry.controlMode = "observed"
                 pushedSessionsById[sessionId] = entry
@@ -5421,7 +5484,7 @@ final class DaemonServer {
             // (notify can race ahead of the OTel turn_start span when
             // both signals are configured).
             if let sessionId, var entry = pushedSessionsById[sessionId] {
-                entry.agentType = "codex-cli"
+                entry.agentType = codexObservedAgentType(sessionId: sessionId)
                 pushedSessionsById[sessionId] = entry
                 upsertIntoCachedSessions(entry)
             }
@@ -8253,30 +8316,23 @@ final class DaemonServer {
             merged.append(pushed)
         }
 
-        let hasObservedCodexAppSession = merged.contains { entry in
-            entry.id.hasPrefix("observed:codex-app:")
-        }
-        if hasObservedCodexAppSession,
-           pushedSessionsById[Self.codexAnonymousOtelSessionId] != nil {
-            purgeCodexSessionState(Self.codexAnonymousOtelSessionId)
-            merged.removeAll { $0.id == Self.codexAnonymousOtelSessionId }
-        }
-
-        let hasDurableCodexAppSession = merged.contains { entry in
+        // Desktop Codex used to have a process observer here
+        // (LocalCodexAppObserver). It guarded on "Codex.app/Contents/Resources"
+        // while the shipped bundle is ChatGPT.app, so in its whole life it
+        // matched zero processes and produced zero rows — and reviving it
+        // would double-report sessions the lifecycle hooks already push,
+        // because its kernel.js --session-id has no mapping to the rollout
+        // uuid the hook rows are keyed by. Desktop detection rides the hook
+        // path instead: codexObservedAgentType reads the rollout head's
+        // session_meta.originator, the same fact the Node daemon labels from.
+        let hasCodexAppSession = merged.contains { entry in
             entry.agentType == Self.codexAppAgentType
                 && entry.id != Self.codexAnonymousOtelSessionId
         }
-        let observedCodexAppSessions = hasDurableCodexAppSession
-            ? []
-            : LocalCodexAppObserver.collect()
-        if !observedCodexAppSessions.isEmpty,
+        if hasCodexAppSession,
            pushedSessionsById[Self.codexAnonymousOtelSessionId] != nil {
             purgeCodexSessionState(Self.codexAnonymousOtelSessionId)
-        }
-        let observedIds = Set(observedCodexAppSessions.map(\.id))
-        let mergedIds = Set(merged.map(\.id))
-        for observed in observedCodexAppSessions where !mergedIds.contains(observed.id) {
-            merged.append(observed)
+            merged.removeAll { $0.id == Self.codexAnonymousOtelSessionId }
         }
 
         // Kiro is observed the same way, and for a stronger reason: it emits no
@@ -8334,7 +8390,6 @@ final class DaemonServer {
             // Keep filesystem entries unconditionally; drop pushed entries
             // whose probe failed (already pruned above, double-gate for safety).
             if registryEntries.contains(where: { $0.id == entry.id }) { return true }
-            if observedIds.contains(entry.id) { return true }
             return livePushedIds.contains(entry.id)
         })
         broadcastSessionsList()

@@ -14,7 +14,8 @@
 // it and why this exists: without it, a Kiro session is invisible to anyone
 // running the App Store app alone.
 //
-// Two things make this different from `LocalCodexAppObserver`:
+// Two things distinguish this from a process-table observer (the shape the
+// retired `LocalCodexAppObserver` had):
 //
 //  - **The sandbox cannot read `~/.kiro` on a home-relative path.** The app
 //    holds no such entitlement and will not get one. Access comes from a
