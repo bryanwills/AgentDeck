@@ -34,6 +34,18 @@ inline Erase chooseErase(bool hardClear) {
     return hardClear ? Erase::ClearAll : Erase::Differential;
 }
 
+// A touch interaction runs on quiet differential erases by design — flashing
+// mid-interaction is what the retained frame exists to prevent — but each
+// grayscale differential leaves a little pigment behind, so a tap session ends
+// with a visibly foggy panel until the scheduled sweep. Once the user has
+// stopped touching for `quietMs`, one hard sweep restores a crisp panel at the
+// moment its flash costs the least attention.
+inline bool postInteractionSweepDue(uint32_t lastInteractionMs, uint8_t differentialCount,
+                                    uint32_t nowMs, uint32_t quietMs) {
+    return lastInteractionMs != 0 && differentialCount > 0 &&
+           (uint32_t)(nowMs - lastInteractionMs) > quietMs;
+}
+
 inline void recordErase(RefreshState& state, Erase erase, uint32_t nowMs) {
     if (isHardClear(erase)) {
         state.differentialCount = 0;

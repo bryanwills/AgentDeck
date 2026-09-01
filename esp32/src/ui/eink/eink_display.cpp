@@ -1260,6 +1260,12 @@ AgentDeckEpd47::Page epd47Page = AgentDeckEpd47::Page::Limits;
 // measurement behind this.
 constexpr uint32_t EPD47_PAGE_SETTLE_MS = 2UL * MIN_REFRESH_INTERVAL_MS;
 AgentDeckEpd47::PageArbiter epd47Arbiter;
+// Post-interaction anti-ghost sweep (see epd47_refresh_policy.h). 12s of touch
+// silence: longer than the gap between taps in one session, well under the
+// 60s ambient interval — chosen, not measured.
+constexpr uint32_t EPD47_POST_TOUCH_SWEEP_QUIET_MS = 12000;
+uint32_t epd47LastTouchMs = 0;
+bool epd47PostTouchSweepDue = false;
 uint32_t epd47PageHoldUntilMs = 0;
 AgentDeckEpd47::Page lastPhysicalEpd47Page = AgentDeckEpd47::Page::Limits;
 bool physicalEpd47PageReady = false;
@@ -1477,10 +1483,15 @@ void drawPaperHeader(const Snap& s, PaperFace face) {
     const char* title = face == PaperFace::Glance ? "AgentDeck" : faceName(face);
     textAt(pad + (W <= 420 ? 40 : 54), W <= 420 ? 36 : 46,
            title, W <= 420 ? &FreeSansBold12pt7b : &FreeSansBold18pt7b);
-    char status[40];
-    snprintf(status, sizeof(status), "%s", s.bridgeConnected ? "SYNCED" : "OFFLINE");
-    textRight(W - pad, W <= 420 ? 34 : 42, status,
-              W <= 420 ? CLASSIC_FONT : &FreeSansBold9pt7b);
+    // Link state is exception-based: a healthy link says nothing (SYNCED was
+    // permanent chrome answering a question nobody asked), and OFFLINE is the
+    // one word that earns the accent ink — a dead link is the thing the user
+    // must act on. The Swift preview has drawn it this way all along.
+    if (!s.bridgeConnected) {
+        InkScope ink(accentColor());
+        textRight(W - pad, W <= 420 ? 34 : 42, "OFFLINE",
+                  W <= 420 ? CLASSIC_FONT : &FreeSansBold9pt7b);
+    }
     display.drawFastHLine(pad, headerH, W - pad * 2, GxEPD_BLACK);
 }
 
@@ -1500,7 +1511,11 @@ void drawMiniUsage(int16_t x, int16_t y, int16_t w, const char* label, float pct
     display.drawRect(bx, y, bw, 11, EINK_INK_RULE);
     if (pct >= 0) {
         int fill = (int)((bw - 4) * min(100.0f, max(0.0f, pct)) / 100.0f);
-        display.fillRect(bx + 2, y + 2, fill, 7, GxEPD_BLACK);
+        // A nearly exhausted window is the one gauge state the user must act
+        // on, so it takes the semantic accent (red on the tri-color glass;
+        // collapses to black everywhere else — DESIGN.md rule 4).
+        display.fillRect(bx + 2, y + 2, fill, 7,
+                         pct >= 90.0f ? accentColor() : GxEPD_BLACK);
     }
     char value[10]; snprintf(value, sizeof(value), pct >= 0 ? "%d%%" : "--", (int)pct);
     textRight(x + w, y + 10, value, CLASSIC_FONT);
@@ -1563,38 +1578,26 @@ void drawEp47Chrome(const Snap& s, AgentDeckEpd47::Page selected) {
         if (page == selected) display.fillRect(x + 14, 58, tabW - 28, 6, GxEPD_BLACK);
     }
 
-    char link[28];
-    snprintf(link, sizeof(link), "%s", s.bridgeConnected ? "SYNCED" : "OFFLINE");
-    {
-        InkScope ink(s.bridgeConnected ? EINK_INK_MUTED : GxEPD_BLACK);
-        textRight(W - 20, 42, link, &FreeSansBold9pt7b);
+    // Exception-based, like the paper header: silence means healthy.
+    if (!s.bridgeConnected) {
+        textRight(W - 20, 42, "OFFLINE", &FreeSansBold9pt7b);
     }
     display.drawFastHLine(20, headerH, W - 40, EINK_INK_RULE);
 }
 
-void drawEp47Footer(const Snap& s, const char* automaticReason) {
+void drawEp47Footer(const Snap& s) {
     constexpr int16_t y = 492;
     display.drawFastHLine(20, y - 14, W - 40, EINK_INK_RULE);
-    const bool held = epd47PageHoldUntilMs != 0 &&
-                      (int32_t)(epd47PageHoldUntilMs - millis()) > 0;
-    char mode[84];
-    if (held) {
-        const uint32_t leftMin = (epd47PageHoldUntilMs - millis() + 59999UL) / 60000UL;
-        snprintf(mode, sizeof(mode), "HELD / %lum  ·  %s READY",
-                 (unsigned long)leftMin,
-                 AgentDeckEpd47::pageName(epd47AutomaticPage(s)));
-    } else {
-        snprintf(mode, sizeof(mode), "AUTO  ·  %s", automaticReason);
-    }
-    {
-        InkScope ink(EINK_INK_MUTED);
-        textAt(20, y + 20, mode, &FreeSansBold9pt7b);
-    }
+    // No arbitration chrome. "HELD / 8m · QUEUE READY" narrated the page
+    // arbiter's internal state — a question nobody asked — and collided with
+    // the event ticker beside it. The footer carries content: the latest
+    // timeline event, and the one capability hint that changes what a user
+    // does with their hands.
     if (s.tickerCount > 0) {
         char event[116];
-        smartFitText(event, sizeof(event), s.tickerText[0], 520, &FreeSans9pt7b);
+        smartFitText(event, sizeof(event), s.tickerText[0], 660, &FreeSans9pt7b);
         InkScope ink(EINK_INK_BODY);
-        smartTextAt(250, y + 20, event, &FreeSans9pt7b);
+        smartTextAt(20, y + 20, event, &FreeSans9pt7b);
     }
     if (!epd47TouchAvailable()) {
         textRight(W - 20, y + 20, "TOUCH OFF  |  GPIO21 NEXT", CLASSIC_FONT);
@@ -1646,8 +1649,16 @@ void drawEp47ProviderCard(int16_t x, const char* agentType, const char* name,
                &FreeSans9pt7b);
         return;
     }
-    drawEp47Window(x + 24, y + 126, w - 48, "5H", first, firstReset);
-    drawEp47Window(x + 24, y + 238, w - 48, "7D", second, secondReset);
+    // Only the windows the account exposes (the Stream Deck dial rule, #269):
+    // an absent window drew a "--" frame and an empty track, which reads as a
+    // broken gauge, not as "this plan has no 5H limit". A lone window keeps
+    // the first slot and the card breathes below it.
+    int16_t wy = y + 126;
+    if (first >= 0) {
+        drawEp47Window(x + 24, wy, w - 48, "5H", first, firstReset);
+        wy += 112;
+    }
+    if (second >= 0) drawEp47Window(x + 24, wy, w - 48, "7D", second, secondReset);
 }
 
 void drawEp47Limits(const Snap& s) {
@@ -1656,7 +1667,7 @@ void drawEp47Limits(const Snap& s) {
                          s.fiveH, s.fiveReset, s.sevenD, s.sevenReset, s.usageStale);
     drawEp47ProviderCard(492, "codex-cli", "CODEX", s.codexPlan,
                          s.codexP, s.codexPReset, s.codexS, s.codexSReset, false);
-    drawEp47Footer(s, "NO ACTIVE WORK / LIMITS RESTING PAGE");
+    drawEp47Footer(s);
 }
 
 void drawEp47Focus(const Snap& s) {
@@ -1668,7 +1679,7 @@ void drawEp47Focus(const Snap& s) {
         InkScope ink(EINK_INK_BODY);
         textAt(172, 224, "No active work. LIMITS is the automatic resting page.",
                &FreeSans9pt7b);
-        drawEp47Footer(s, "FOCUS HELD / NO ACTIVE WORK");
+        drawEp47Footer(s);
         return;
     }
 
@@ -1718,14 +1729,18 @@ void drawEp47Focus(const Snap& s) {
         InkScope ink(EINK_INK_MUTED);
         textAt(752, 268, "WORKING", CLASSIC_FONT);
     }
-    drawMiniUsage(752, 328, 174, "CLA", s.fiveH);
-    drawMiniUsage(752, 376, 174, "CDX", s.codexP);
+    int16_t gaugeY = 328;
+    if (s.fiveH >= 0) {
+        drawMiniUsage(752, gaugeY, 174, "Claude", s.fiveH, 46);
+        gaugeY += 48;
+    }
+    if (s.codexP >= 0) drawMiniUsage(752, gaugeY, 174, "Codex", s.codexP, 46);
     if (awaiting) {
         textAt(752, 430,
                epd47TouchAvailable() ? "TAP CARD · DECIDE" : "GPIO21 · DECIDE",
                &FreeSansBold9pt7b);
     }
-    drawEp47Footer(s, awaiting ? "ATTENTION IN FOCUS" : "ONE ACTIVE SESSION");
+    drawEp47Footer(s);
 }
 
 uint8_t epd47ActiveOrder(const Snap& s, uint8_t out[MAX_ROWS]) {
@@ -1802,13 +1817,24 @@ void drawEp47Queue(const Snap& s) {
     // Shorter rows free ~250px. Spend it on the provider limits rail rather than
     // white paper: the InkDeck board already proves a permanent usage strip is
     // worth its space, and QUEUE previously made the user change tabs for it.
+    // Only the windows the account exposes; the survivors share the width.
     constexpr int16_t railY = 452;
-    display.drawFastHLine(24, railY - 14, W - 48, EINK_INK_RULE);
-    drawMiniUsage(24, railY, 220, "CLA 5H", s.fiveH, 52);
-    drawMiniUsage(258, railY, 220, "CLA 7D", s.sevenD, 52);
-    drawMiniUsage(492, railY, 220, "CDX 5H", s.codexP, 52);
-    drawMiniUsage(726, railY, 210, "CDX 7D", s.codexS, 52);
-    drawEp47Footer(s, "MULTIPLE ACTIVE SESSIONS");
+    struct Rail { const char* label; float pct; };
+    Rail rails[4];
+    uint8_t railCount = 0;
+    if (s.fiveH >= 0)  rails[railCount++] = {"Claude 5H", s.fiveH};
+    if (s.sevenD >= 0) rails[railCount++] = {"Claude 7D", s.sevenD};
+    if (s.codexP >= 0) rails[railCount++] = {"Codex 5H", s.codexP};
+    if (s.codexS >= 0) rails[railCount++] = {"Codex 7D", s.codexS};
+    if (railCount > 0) {
+        display.drawFastHLine(24, railY - 14, W - 48, EINK_INK_RULE);
+        const int16_t stride = (int16_t)((W - 48 + 14) / railCount);
+        for (uint8_t rIdx = 0; rIdx < railCount; rIdx++) {
+            drawMiniUsage(24 + rIdx * stride, railY, stride - 14,
+                          rails[rIdx].label, rails[rIdx].pct, 64);
+        }
+    }
+    drawEp47Footer(s);
 }
 
 void drawEp47Glance(const Snap& s) {
@@ -1902,39 +1928,68 @@ void drawGlanceFace(const Snap& s) {
         }
     }
 #if defined(AGENTDECK_NM_UI)
-    // The old two-gauge strip silently discarded both 7D windows and every
-    // reset time. The 4.2-inch panel has room for all four limits when they are
-    // arranged as provider rows, keeping the main session summary intact.
+    // Usage rows follow the account's actual window shape (the Stream Deck
+    // dial rule, #269): a window the provider does not expose gets no frame —
+    // the surviving window takes the row's full width, and a provider with no
+    // windows at all yields its row. Labels are the brand words every other
+    // surface uses (agent_label.h), not initialisms a passer-by cannot read.
     constexpr int16_t usageY = 220;
-    constexpr int16_t providerW = 34;
+    constexpr int16_t providerW = 52;
     const int16_t gaugeX = x + providerW;
     const int16_t gaugeGap = 8;
-    const int16_t gaugeW = (W - gaugeX - pad - gaugeGap) / 2;
-    textAt(x, usageY + 10, "CLA", CLASSIC_FONT);
-    drawMiniUsage(gaugeX, usageY, gaugeW, "5H", s.fiveH, 18);
-    drawMiniUsage(gaugeX + gaugeW + gaugeGap, usageY, gaugeW, "7D", s.sevenD, 18);
-    textAt(x, usageY + 29, "CDX", CLASSIC_FONT);
-    drawMiniUsage(gaugeX, usageY + 19, gaugeW, "5H", s.codexP, 18);
-    drawMiniUsage(gaugeX + gaugeW + gaugeGap, usageY + 19, gaugeW, "7D", s.codexS, 18);
+    const int16_t fullW = W - gaugeX - pad;
+    const int16_t halfW = (fullW - gaugeGap) / 2;
+    int16_t rowY = usageY;
+    auto providerRow = [&](const char* brand, float five, float seven) {
+        const bool hasFive = five >= 0, hasSeven = seven >= 0;
+        if (!hasFive && !hasSeven) return;
+        textAt(x, rowY + 10, brand, CLASSIC_FONT);
+        if (hasFive && hasSeven) {
+            drawMiniUsage(gaugeX, rowY, halfW, "5H", five, 18);
+            drawMiniUsage(gaugeX + halfW + gaugeGap, rowY, halfW, "7D", seven, 18);
+        } else {
+            drawMiniUsage(gaugeX, rowY, fullW, hasFive ? "5H" : "7D",
+                          hasFive ? five : seven, 18);
+        }
+        rowY += 19;
+    };
+    providerRow("Claude", s.fiveH, s.sevenD);
+    providerRow("Codex", s.codexP, s.codexS);
 
-    char resets[88];
-    snprintf(resets, sizeof(resets), "RESET C %s / %s  X %s / %s",
-             s.fiveReset[0] ? s.fiveReset : "--",
-             s.sevenReset[0] ? s.sevenReset : "--",
-             s.codexPReset[0] ? s.codexPReset : "--",
-             s.codexSReset[0] ? s.codexSReset : "--");
-    char fittedResets[88];
-    smartFitText(fittedResets, sizeof(fittedResets), resets, W - x - pad, CLASSIC_FONT);
-    smartTextAt(x, usageY + 56, fittedResets, CLASSIC_FONT);
-
-    display.drawFastHLine(pad, H - 25, W - pad * 2, GxEPD_BLACK);
-    textAt(pad, H - 10, attention > 0 ? "BOOT  DECIDE" : "BOOT  HISTORY", CLASSIC_FONT);
-    textRight(W - pad, H - 10, "USER  HOME", CLASSIC_FONT);
+    // Reset countdowns for the windows that exist, and only those — "--"
+    // placeholders for absent windows restated the empty-frame mistake in
+    // text. The whole line disappears when nothing has a countdown.
+    char resets[96] = "";
+    size_t rlen = 0;
+    auto addReset = [&](const char* tag, float pct, const char* reset) {
+        if (pct < 0 || !reset[0]) return;
+        rlen += snprintf(resets + rlen, sizeof(resets) - rlen, "%s%s %s",
+                         rlen ? "  " : "RESET ", tag, reset);
+    };
+    addReset("C5H", s.fiveH, s.fiveReset);
+    addReset("C7D", s.sevenD, s.sevenReset);
+    addReset("X5H", s.codexP, s.codexPReset);
+    addReset("X7D", s.codexS, s.codexSReset);
+    if (resets[0]) {
+        char fittedResets[96];
+        smartFitText(fittedResets, sizeof(fittedResets), resets, W - x - pad, CLASSIC_FONT);
+        smartTextAt(x, usageY + 56, fittedResets, CLASSIC_FONT);
+    }
+    // No key-legend footer: the installed unit exposes no usable buttons, so
+    // BOOT/USER chrome was permanent instructions for controls the user
+    // cannot press. The key handlers stay wired for hardware that has them.
 #else
     const int16_t usageY = H - 38;
+    const bool hasClaude = s.fiveH >= 0;
+    const bool hasCodex = s.codexP >= 0;
     const int16_t uw = (W - x - pad - 12) / 2;
-    drawMiniUsage(x, usageY, uw, "CLA", s.fiveH);
-    drawMiniUsage(x + uw + 12, usageY, uw, "CDX", s.codexP);
+    if (hasClaude && hasCodex) {
+        drawMiniUsage(x, usageY, uw, "Claude", s.fiveH, 46);
+        drawMiniUsage(x + uw + 12, usageY, uw, "Codex", s.codexP, 46);
+    } else if (hasClaude || hasCodex) {
+        drawMiniUsage(x, usageY, W - x - pad, hasClaude ? "Claude" : "Codex",
+                      hasClaude ? s.fiveH : s.codexP, 46);
+    }
 #endif
 }
 
@@ -2037,13 +2092,11 @@ void drawDecisionFace(const Snap& s) {
     }
 #if defined(AGENTDECK_NM_UI)
     display.drawFastHLine(pad, H - 29, W - pad * 2, GxEPD_BLACK);
-    if (s.optionCount > 0) {
-        textAt(pad, H - 10, "BOOT  NEXT", CLASSIC_FONT);
-        textRight(W - pad, H - 10, "USER  CONFIRM", CLASSIC_FONT);
-    } else {
-        textAt(pad, H - 10, "RESPOND ON COMPUTER", CLASSIC_FONT);
-        textRight(W - pad, H - 10, "USER  HOME", CLASSIC_FONT);
-    }
+    // The installed unit exposes no usable buttons, so a BOOT/USER key legend
+    // documented controls the user cannot press. The one honest instruction is
+    // where the answer can actually be given; the key handlers stay wired for
+    // hardware that has them.
+    textAt(pad, H - 10, "RESPOND ON COMPUTER OR DECK", CLASSIC_FONT);
 #elif defined(AGENTDECK_INKDECK_UI)
     display.drawFastHLine(pad, H - 34, W - pad * 2, GxEPD_BLACK);
     if (s.optionCount > 0) {
@@ -2616,7 +2669,19 @@ void update(float /*dt*/) {
             // erase the prior frame unless a scheduled hard clear is due.
             forceFull = true;
             lastHash = 0;
+            epd47LastTouchMs = now;
         }
+    }
+    // One hard sweep after the tap session ends: quiet differential erases
+    // leave grayscale residue, and the flash costs least attention when the
+    // user has already stopped touching.
+    if (AgentDeckEpd47::postInteractionSweepDue(
+            epd47LastTouchMs, epd47RefreshState.differentialCount, now,
+            EPD47_POST_TOUCH_SWEEP_QUIET_MS)) {
+        epd47LastTouchMs = 0;
+        epd47PostTouchSweepDue = true;
+        forceRefresh = true;
+        lastHash = 0;
     }
 #endif
 }
@@ -2728,7 +2793,8 @@ void render() {
     // does not reset the hard-clear count or age.
     const bool epd47HardClear = AgentDeckEpd47::hardClearDue(
         epd47RefreshState, firstDraw, now, FULL_EVERY_N_PARTIALS,
-        FULL_MAX_AGE_MS);
+        FULL_MAX_AGE_MS) || epd47PostTouchSweepDue;
+    epd47PostTouchSweepDue = false;
     const AgentDeckEpd47::Erase epd47Erase =
         AgentDeckEpd47::chooseErase(epd47HardClear);
     refresh(searching ? drawSearching : drawDashboard, s,

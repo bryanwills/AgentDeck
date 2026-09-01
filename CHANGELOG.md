@@ -119,6 +119,30 @@ state) bypassing it, because 100% of this board's repaints are full tri-color
 cycles (measured 93/93). The speaker was configured correctly all along and set
 18 dB too quiet.
 
+### The paper says less, and what it says is legible
+
+Field review of the flashed panels sent four pieces of chrome away. SYNCED is
+gone — a healthy link says nothing, and OFFLINE (in the accent ink) is the one
+word that earns space, which is how the Mac preview always drew it. The
+BOOT/USER key legends are gone from the NM faces — the installed unit exposes
+no usable buttons, so they were permanent instructions for controls the user
+cannot press. The EPD47 footer no longer narrates the page arbiter
+("HELD / 8m · QUEUE READY") into the same pixels as the event ticker. And
+usage gauges are labeled Claude/Codex — the brand words every other surface
+uses — instead of CLA/CDX initialisms.
+
+Usage rows now follow the account's actual window shape (the Stream Deck dial
+rule): a window the provider does not expose gets no empty frame anywhere — NM
+glance rows, the EPD47 queue rail, focus gauges, and the limits provider
+cards all give the surviving windows the freed width. A gauge at or past 90%
+fills in the semantic accent (red on the tri-color glass).
+
+Touch sessions on the EPD47 stay quiet (differential erases), and one hard
+anti-ghost sweep now runs 12 seconds after the last tap — grayscale
+differentials each leave a little pigment behind, so the sweep lands when its
+flash costs the least attention instead of leaving the panel foggy until the
+next scheduled clear.
+
 ### Surface modes and pull-aware paper faces
 
 Offline, sleeping, live, and interactive states are explicit surface modes with
