@@ -143,6 +143,18 @@ differentials each leave a little pigment behind, so the sweep lands when its
 flash costs the least attention instead of leaving the panel foggy until the
 next scheduled clear.
 
+A second field pass tightened the same surfaces. NM usage adopts the InkDeck
+footer grammar at 400px: a brand glyph per provider, one row per window with
+its reset countdown inline beside the gauge, replacing both the text labels
+and the cryptic composite "RESET C5H …" line. The NM decide face labels its
+BOOT/USER keys again — the unit does have keys on its top edge, and chrome
+earns space exactly where it changes what the user does right now — while the
+ambient glance stays unlabeled. The EPD47 footer shows up to two timeline
+rows without colliding with the capability hint. And a milestone ticker row
+replacing another on the InkDeck now spends one full flash: under a partial
+waveform the old text ghosts beneath the new, which reads as overlapping
+print, not as fading.
+
 ### Surface modes and pull-aware paper faces
 
 Offline, sleeping, live, and interactive states are explicit surface modes with

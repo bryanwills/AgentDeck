@@ -1590,19 +1590,23 @@ void drawEp47Footer(const Snap& s) {
     display.drawFastHLine(20, y - 14, W - 40, EINK_INK_RULE);
     // No arbitration chrome. "HELD / 8m · QUEUE READY" narrated the page
     // arbiter's internal state — a question nobody asked — and collided with
-    // the event ticker beside it. The footer carries content: the latest
-    // timeline event, and the one capability hint that changes what a user
-    // does with their hands.
-    if (s.tickerCount > 0) {
+    // the event ticker beside it. The footer carries content: up to two
+    // timeline rows, and the one capability hint that changes what a user
+    // does with their hands. The first row shares its width with that hint;
+    // the second gets the full span.
+    const uint8_t tickerLines = s.tickerCount > 1 ? 2 : s.tickerCount;
+    for (uint8_t ti = 0; ti < tickerLines; ti++) {
         char event[116];
-        smartFitText(event, sizeof(event), s.tickerText[0], 660, &FreeSans9pt7b);
+        const int16_t lineY = y + 8 + (int16_t)ti * 24;
+        smartFitText(event, sizeof(event), s.tickerText[ti],
+                     ti == 0 ? 660 : (int16_t)(W - 40), &FreeSans9pt7b);
         InkScope ink(EINK_INK_BODY);
-        smartTextAt(20, y + 20, event, &FreeSans9pt7b);
+        smartTextAt(20, lineY, event, &FreeSans9pt7b);
     }
     if (!epd47TouchAvailable()) {
-        textRight(W - 20, y + 20, "TOUCH OFF  |  GPIO21 NEXT", CLASSIC_FONT);
+        textRight(W - 20, y + 8, "TOUCH OFF  |  GPIO21 NEXT", CLASSIC_FONT);
     } else if (s.agPlan[0]) {
-        textRight(W - 20, y + 20, s.agPlan, CLASSIC_FONT);
+        textRight(W - 20, y + 8, s.agPlan, CLASSIC_FONT);
     }
 }
 
@@ -1928,56 +1932,38 @@ void drawGlanceFace(const Snap& s) {
         }
     }
 #if defined(AGENTDECK_NM_UI)
-    // Usage rows follow the account's actual window shape (the Stream Deck
-    // dial rule, #269): a window the provider does not expose gets no frame —
-    // the surviving window takes the row's full width, and a provider with no
-    // windows at all yields its row. Labels are the brand words every other
-    // surface uses (agent_label.h), not initialisms a passer-by cannot read.
-    constexpr int16_t usageY = 220;
-    constexpr int16_t providerW = 52;
-    const int16_t gaugeX = x + providerW;
-    const int16_t gaugeGap = 8;
-    const int16_t fullW = W - gaugeX - pad;
-    const int16_t halfW = (fullW - gaugeGap) / 2;
+    // Usage adopts the InkDeck footer grammar at 400px: brand GLYPH per
+    // provider, one row per window the account actually exposes (the Stream
+    // Deck dial rule, #269 — no empty frames), reset countdown inline beside
+    // each gauge instead of a cryptic composite line below them. A provider
+    // with no windows yields its rows entirely.
+    constexpr int16_t usageY = 216;
+    constexpr int16_t rowH = 15;
+    constexpr int16_t glyphSize = 20;
+    const int16_t gaugeX = x + glyphSize + 8;
+    const int16_t gaugeW = 158;
     int16_t rowY = usageY;
-    auto providerRow = [&](const char* brand, float five, float seven) {
+    auto windowRow = [&](const char* tag, float pct, const char* reset) {
+        drawMiniUsage(gaugeX, rowY, gaugeW, tag, pct, 16);
+        if (reset && reset[0]) {
+            InkScope ink(EINK_INK_MUTED);
+            textAt(gaugeX + gaugeW + 8, rowY + 10, reset, CLASSIC_FONT);
+        }
+        rowY += rowH;
+    };
+    auto providerBlock = [&](const char* agentType, float five, const char* fiveR,
+                             float seven, const char* sevenR) {
         const bool hasFive = five >= 0, hasSeven = seven >= 0;
         if (!hasFive && !hasSeven) return;
-        textAt(x, rowY + 10, brand, CLASSIC_FONT);
-        if (hasFive && hasSeven) {
-            drawMiniUsage(gaugeX, rowY, halfW, "5H", five, 18);
-            drawMiniUsage(gaugeX + halfW + gaugeGap, rowY, halfW, "7D", seven, 18);
-        } else {
-            drawMiniUsage(gaugeX, rowY, fullW, hasFive ? "5H" : "7D",
-                          hasFive ? five : seven, 18);
-        }
-        rowY += 19;
+        drawAgentGlyph(agentType, x, rowY + 1, glyphSize);
+        if (hasFive) windowRow("5H", five, fiveR);
+        if (hasSeven) windowRow("7D", seven, sevenR);
+        rowY += 4;
     };
-    providerRow("Claude", s.fiveH, s.sevenD);
-    providerRow("Codex", s.codexP, s.codexS);
-
-    // Reset countdowns for the windows that exist, and only those — "--"
-    // placeholders for absent windows restated the empty-frame mistake in
-    // text. The whole line disappears when nothing has a countdown.
-    char resets[96] = "";
-    size_t rlen = 0;
-    auto addReset = [&](const char* tag, float pct, const char* reset) {
-        if (pct < 0 || !reset[0]) return;
-        rlen += snprintf(resets + rlen, sizeof(resets) - rlen, "%s%s %s",
-                         rlen ? "  " : "RESET ", tag, reset);
-    };
-    addReset("C5H", s.fiveH, s.fiveReset);
-    addReset("C7D", s.sevenD, s.sevenReset);
-    addReset("X5H", s.codexP, s.codexPReset);
-    addReset("X7D", s.codexS, s.codexSReset);
-    if (resets[0]) {
-        char fittedResets[96];
-        smartFitText(fittedResets, sizeof(fittedResets), resets, W - x - pad, CLASSIC_FONT);
-        smartTextAt(x, usageY + 56, fittedResets, CLASSIC_FONT);
-    }
-    // No key-legend footer: the installed unit exposes no usable buttons, so
-    // BOOT/USER chrome was permanent instructions for controls the user
-    // cannot press. The key handlers stay wired for hardware that has them.
+    providerBlock("claude-code", s.fiveH, s.fiveReset, s.sevenD, s.sevenReset);
+    providerBlock("codex-cli", s.codexP, s.codexPReset, s.codexS, s.codexSReset);
+    // The glance stays key-legend-free: the RESET/USER/BOOT keys on the top
+    // edge only matter on the decide face, which labels them.
 #else
     const int16_t usageY = H - 38;
     const bool hasClaude = s.fiveH >= 0;
@@ -2092,11 +2078,16 @@ void drawDecisionFace(const Snap& s) {
     }
 #if defined(AGENTDECK_NM_UI)
     display.drawFastHLine(pad, H - 29, W - pad * 2, GxEPD_BLACK);
-    // The installed unit exposes no usable buttons, so a BOOT/USER key legend
-    // documented controls the user cannot press. The one honest instruction is
-    // where the answer can actually be given; the key handlers stay wired for
-    // hardware that has them.
-    textAt(pad, H - 10, "RESPOND ON COMPUTER OR DECK", CLASSIC_FONT);
+    // The unit does have RESET/USER/BOOT keys on its top edge. Chrome earns
+    // space only where it changes what the user does RIGHT NOW: on this face
+    // the keys are the answer path, so the legend returns here — and only
+    // here. The ambient glance stays unlabeled.
+    if (s.optionCount > 0) {
+        textAt(pad, H - 10, "BOOT  NEXT", CLASSIC_FONT);
+        textRight(W - pad, H - 10, "USER  CONFIRM", CLASSIC_FONT);
+    } else {
+        textAt(pad, H - 10, "RESPOND ON COMPUTER OR DECK", CLASSIC_FONT);
+    }
 #elif defined(AGENTDECK_INKDECK_UI)
     display.drawFastHLine(pad, H - 34, W - pad * 2, GxEPD_BLACK);
     if (s.optionCount > 0) {
@@ -2800,7 +2791,15 @@ void render() {
     refresh(searching ? drawSearching : drawDashboard, s,
             epd47HardClear, epd47Erase);
 #else
-    bool full = forceFull || firstDraw ||
+    // A milestone ticker row replacing another under a partial waveform
+    // leaves the old text ghosted beneath the new — on the panel it reads as
+    // overlapping print, not as fading. Text-on-text is the one ghost worth a
+    // full flash on its own; `lastTickerShown` was recorded for exactly this
+    // and nothing consumed it. Guarded on a previous value so the first row
+    // after boot rides `firstDraw`.
+    const bool tickerReplaced = lastTickerShown[0] != '\0' && s.tickerCount > 0 &&
+        strncmp(lastTickerShown, s.tickerText[0], sizeof(lastTickerShown) - 1) != 0;
+    bool full = forceFull || firstDraw || tickerReplaced ||
                 partialCount >= FULL_EVERY_N_PARTIALS ||
                 (now - lastFullMs) > FULL_MAX_AGE_MS ||
                 (searching != wasSearching);
