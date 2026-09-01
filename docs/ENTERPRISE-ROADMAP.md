@@ -232,7 +232,7 @@ reported no posture at all — indistinguishable from an open one.
 
 ### 2.1 P0 — every daemon publishes the *same* mDNS instance name
 
-Node (`bridge/src/mdns.ts:148`) and Swift (`apple/.../MdnsModule.swift:43`) both
+Node (`bridge/src/mdns.ts:148`) and Swift (`apple/.../MdnsAdvertisement.swift`) both
 publish:
 
 ```

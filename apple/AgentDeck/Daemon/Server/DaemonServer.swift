@@ -1788,18 +1788,12 @@ final class DaemonServer {
         // listener would be noise for a service nobody on the segment can
         // reach (republishBonjour no-ops on the nil service).
         if posture.advertisesOnLAN {
-            let txtRecord = NWTXTRecord([
-                "project": "daemon",
-                "agent": "daemon",
-                "port": "\(port)",
-                "ip": AuthManager.getLanIP() ?? "127.0.0.1",
-                "v": "3",
-            ])
-            await wsServer.setBonjourService(NWListener.Service(
-                name: "daemon-\(port)",
-                type: "_agentdeck._tcp",
-                txtRecord: txtRecord
-            ))
+            // Identity comes from the mdns-identity SSOT via MdnsAdvertisement
+            // — this call site is scanned by MdnsAdvertisementTests, because a
+            // literal here once drifted from the SSOT for the whole life of
+            // the feature while every drift gate stayed green.
+            await wsServer.setBonjourService(
+                MdnsAdvertisement.service(port: port, lanIP: AuthManager.getLanIP()))
         }
 
         // Await listener `.ready` — throws on bind failure (EADDRINUSE etc).

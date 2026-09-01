@@ -56,6 +56,19 @@ and the UI labels which kind a grant is, because only the device-scoped one
 survives a DHCP lease change. A refused device is pointed at this approval flow
 instead of at a CLI command its user may not have.
 
+### The Mac daemon advertises the identity both daemons agreed on
+
+The Swift daemon's Bonjour advertisement was a hand-typed literal —
+`daemon-9120`, with a TXT record missing the host/user keys — while the
+SSOT-following construction sat in a module nothing instantiated. The
+mdns-identity drift gate compares pure functions and generated mirror bytes,
+so a publisher that consults neither stayed green for the whole life of the
+feature. The advertisement is now composed in one place from the shared
+identity rules (`AgentDeck-<host>-<userTag>-<port>`, same TXT contract as the
+Node daemon), the dead module is deleted, and a new gate drives the real
+builder and scans the publisher's call site so a literal cannot come back
+unnoticed.
+
 ### Epoch milliseconds on the wire are integers
 
 The Swift daemon wrote the subagent census timestamp as a raw

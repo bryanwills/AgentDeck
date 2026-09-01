@@ -208,7 +208,7 @@ export function advertiseBridge(
         project: projectName,
         agent: agentType,
         // TXT schema version — keep in lockstep with the Swift daemon's
-        // advertisement (apple/AgentDeck/Daemon/Modules/MdnsModule.swift) so
+        // advertisement (apple/AgentDeck/Daemon/Server/MdnsAdvertisement.swift) so
         // clients see one contract regardless of which daemon owns the port.
         v: MDNS_TXT_SCHEMA_VERSION,
         port: String(port),
