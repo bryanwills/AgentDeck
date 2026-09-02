@@ -2,12 +2,15 @@
 
 > **Live since 2026-07-28.** The product page is at
 > <https://marketplace.elgato.com/product/agentdeck-dce3806b-176e-40f2-be7d-e029bec0f464>,
-> and the current published version is `1.0.6` (2026-08-18, measured from the
-> product page's own payload), after `1.0.4` (2026-08-05), `1.0.3` (2026-07-31)
+> and the current published version is `1.2` (2026-09-02T21:39Z, measured from
+> the product page's own payload), after `1.0.6`
+> (2026-08-18), `1.0.5` (2026-08-10), `1.0.4` (2026-08-05), `1.0.3` (2026-07-31)
 > and `1.0.2` (2026-07-28).
 > This file stays the source of the listing copy and asset inventory for future revisions.
 
-## 1.2.0 submission (2026-09-02, prepared)
+## 1.2.0 submission (2026-09-02, uploaded · approved 2026-09-02T09:31Z · **published 2026-09-03**)
+
+Released from Maker Console → Versions → `Release` on 2026-09-03 KST; the row reads *Published* and the product-page payload stamps `publish_date: 2026-09-02T21:39:41Z`. The DRM encoder loop below was skipped for this release on the owner's call.
 
 Manifest version `1.2.0.0`, artifact `bound.serendipity.agentdeck.streamDeckPlugin`
 from the `streamdeck-v1.2.0` GitHub Release (same bytes as `pnpm package`).

@@ -8,14 +8,17 @@ created after 2023-11-13 does not apply — production is reachable directly.
 The APK on GitHub Releases stays; Play is an additional channel, not a
 replacement. Nothing in the app changes between them.
 
-## Account state — 1.0.10 live (2026-08-19)
+## Account state — 1.2.0 live (2026-09-02)
 
-Both account verification steps are **done**, and AgentDeck **1.0.10
-(versionCode 12)** is live on the public [Google Play listing](https://play.google.com/store/apps/details?id=dev.agentdeck):
+Both account verification steps are **done**, and AgentDeck **1.2.0
+(versionCode 15)** is live on the public [Google Play listing](https://play.google.com/store/apps/details?id=dev.agentdeck):
 
-It was published on 2026-08-19 as a 100% rollout to all 177 target countries,
-superseding 1.0.9 (versionCode 11, uploaded 2026-08-15) and the first public
-build 1.0.6 (versionCode 8). Store assets are still the set captured for
+It was submitted on 2026-09-02 and published the same day as a 100% rollout to
+all 177 target countries — the console's production track reads `활성 · 최신
+출시 버전: 15 (1.2.0) · 국가/지역 177개` and the public page's *Updated on* is
+Sep 2, 2026 (measured 2026-09-03). It supersedes 1.0.10 (versionCode 12,
+published 2026-08-19), 1.0.9 (versionCode 11, uploaded 2026-08-15) and the
+first public build 1.0.6 (versionCode 8). Store assets are still the set captured for
 1.0.6 — the listing has not been re-shot since.
 
 **Read without a console login** (measured 2026-08-21). The public listing page
@@ -169,7 +172,30 @@ AgentDeck is an independent project and is not affiliated with or endorsed by An
 
 Privacy policy: <https://puritysb.github.io/AgentDeck/#privacy>
 
-## Release notes — 1.0.10 (live)
+## Release notes — 1.2.0 (live)
+
+Transcribed 2026-09-03 from the public listing (`?hl=en` / `?hl=ko`). Japanese
+was not supplied for this release, so the `?hl=ja` page falls back to English.
+
+### English (US)
+
+```
+• Fixed: a fractional timestamp could blank the whole session list when any session had a finished subagent.
+• When your Mac approves this device, the app now redials on its own — a refusal is a short holdoff, not a permanent ban.
+• Pairing identifies this exact device with a per-install id, not just its network address.
+• Focused sessions show their creature again.
+```
+
+### Korean
+
+```
+• 하위 에이전트가 끝난 세션이 있으면 세션 목록 전체가 비어 보이던 문제 수정.
+• Mac에서 이 기기를 승인하면 앱이 스스로 재연결합니다 — 거부는 영구 차단이 아니라 짧은 대기 후 재시도.
+• 설치별 고유 식별자로 페어링 — 네트워크 주소가 아니라 이 기기 자체를 승인.
+• 포커스된 세션의 크리처 표시 복원.
+```
+
+## Release notes — 1.0.10 (superseded 2026-09-02)
 
 Transcribed 2026-08-21 from the public listing itself (`?hl=en` / `?hl=ko` /
 `?hl=ja`), so this is what the store is serving rather than what was drafted.

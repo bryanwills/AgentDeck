@@ -363,6 +363,16 @@ struct MonitorHUD: View {
             nativeWeatherFetchedAt = Date()
             return true
         } catch {
+            // A failed WeatherKit call falls back to the portable MET Norway
+            // feed, whose own attribution makes the switch visible on screen —
+            // but nothing else says WHY. Measured 2026-09-02: every build,
+            // including one whose profile carried the entitlement, showed
+            // "MET Norway" because the App ID had WeatherKit enabled under
+            // Capabilities but not under App Services, and this catch was
+            // silent. Name the error so the next diagnosis reads it here.
+            DaemonLogger.shared.error(
+                "WeatherKit request failed; showing the portable feed instead: \(error)"
+            )
             return false
         }
     }
@@ -415,10 +425,14 @@ private struct DashboardWeatherPill: View {
                             AsyncImage(url: mark) { image in
                                 image.resizable().scaledToFit()
                             } placeholder: {
-                                Text(source.displayName)
+                                // WeatherKit's mark is fetched independently
+                                // from the forecast. Keep the required
+                                // trademark visible if that image is still
+                                // loading or temporarily unavailable.
+                                Text(source.id == "apple-weather" ? " Weather" : source.displayName)
                             }
                         } else {
-                            Text(source.displayName)
+                            Text(source.id == "apple-weather" ? " Weather" : source.displayName)
                         }
                     }
                     .font(.system(size: 8, weight: .medium))

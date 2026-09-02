@@ -38,8 +38,10 @@ re-selects every device on ZIP parse, exactly as it did for 1.0.4), all seven
 language Summary / Detailed introduction pairs re-entered from this file's
 canonical sections (the ZIP re-parse had reset them to one-line manifest
 text), and the update note below (997/1000). Portal confirmed with a "Review
-work updated" toast; the card now shows the 1.2.0 note. Published 1.0.3 keeps
-serving while 1.2.0 is reviewed.
+work updated" toast; the card now shows the 1.2.0 note. **Published on or before
+2026-09-03**: the public listing now reads `Version：1.2.0` (read in a browser —
+the page is client-rendered and `curl` sees no version), so 1.2.0 replaced 1.0.3
+within a day of the in-place edit.
 
 ### Update note (portal field, one per submission)
 

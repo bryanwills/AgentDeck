@@ -126,6 +126,46 @@ The one-time Core Location result is immediately rounded to two decimal places
 (roughly 1 km), stored only in the app container, and declared as unlinked coarse
 location for app functionality in `PrivacyInfo.xcprivacy`.
 
+**Prerequisite that lives outside the repository.** The App ID
+`bound.serendipity.agent.deck` must have WeatherKit enabled under **both**
+Capabilities and App Services in the developer portal. The entitlement and the
+provisioning profile reflect only the first; the framework's request-time JWT
+needs the second. With App Services off — the state found on 2026-09-02 while
+answering the 5.2.5 question — `WeatherService.weather(for:)` throws on every
+build and the Dashboard falls back to the MET Norway feed with *that*
+provider's attribution, so the Apple Weather mark is on no screen at all. The
+toggle is account state: flipping it needs no new binary.
+
+**Reviewer path (macOS).** Open AgentDeck Settings → Dashboard → Weather
+context and click **Use Current Location**. After granting the macOS location
+prompt, close Settings. The weather pill at the top of the Dashboard displays
+the WeatherKit-provided ** Weather** mark. Clicking the mark opens
+WeatherKit's `legalPageURL` (`https://weatherkit.apple.com/legal-attribution.html`).
+The App Review Information attachment `weatherkit-attribution-macos.mov` is a
+recording of this complete flow on a physical Mac.
+
+### Guideline 5.2.5 + 2.3.10 reply for macOS 1.2.0 (5801)
+
+```text
+Hello,
+
+Thank you for the review. Both items are resolved without a new binary.
+
+Guideline 5.2.5 — AgentDeck supports WeatherKit and build 5801 already follows the attribution requirements: the Dashboard's weather pill renders the  Weather mark supplied by WeatherKit's attribution API, and clicking the mark opens Apple's legal attribution page. While preparing the recording we found that WeatherKit was enabled for the App ID under Capabilities but not under App Services, which made the request fail and the Dashboard show the separately attributed MET Norway fallback instead. That App Services setting is now enabled. The attached weatherkit-attribution-macos.mov, recorded on a physical Mac, shows the complete flow:
+
+1. AgentDeck Settings → Dashboard → Weather context → Use Current Location.
+2. After location consent, the weather pill appears at the top of the Dashboard with the  Weather mark.
+3. Clicking the mark opens Apple's WeatherKit legal-attribution page.
+
+Apple Weather values stay inside the Mac app and are cached only in memory. Paired offline-first readers use separately attributed MET Norway data; Apple Weather data is never exported to them. The Review Notes now include this reviewer path.
+
+Guideline 2.3.10 — The Android reference has been removed from the What's New text in English, Korean, and Japanese.
+
+Please continue the review of macOS 1.2.0 (5801).
+
+Thank you.
+```
+
 ## Subprocess execution
 
 **The App Store build of AgentDeck does not spawn any subprocess or create shell scripts for Terminal.** The macOS source tree contains no `Process()` invocation, no `.command` script writer, no AppleScript paths, and no probes for external binaries (`security`, `sqlite3`, `bin/sh`, `/usr/bin/env`, `openclaw`, `whisper-cli`, `networksetup`, `node`, `adb`). The `AGENTDECK_APP_STORE` Swift compile condition is retained as a defense-in-depth gate, and a CI script (`apple/scripts/verify-appstore-archive.sh`) runs after archive to fail the pipeline if any forbidden path string ever reappears in the shipped `.app`'s main Mach-O, or if any bundled executable besides the signed AgentDeck binary is present.
@@ -403,7 +443,7 @@ Contact: admin@foundby.kr
 
 ### macOS Notes field
 
-<!-- notes-field:begin (3,813 chars — recount with `wc -m` after any edit) -->
+<!-- notes-field:begin (3,698 chars — recount with `wc -m` after any edit) -->
 
 ```text
 NO ACCOUNT REQUIRED. Review on a clean Mac with only AgentDeck installed — no external process or terminal setup is part of these instructions.
@@ -416,15 +456,18 @@ HOW TO SEE THE FEATURES WITHOUT ANY AGENT INSTALLED
 2. Click "Preview Devices" in the menu bar — it renders sessions on the built-in preview targets, no hardware or agent required. Fastest way to review the UI.
 3. Click "Pair iPad" to show the QR the iOS companion scans.
 
+WEATHERKIT (Guideline 5.2.5)
+Settings → Dashboard → Weather context → "Use Current Location." Allow location, then close Settings: the top weather pill shows  Weather. Click it for Apple's legal page. The attached weatherkit-attribution-macos.mov records this flow on a physical Mac. Apple data stays in-app and in-memory; readers use attributed MET Norway data.
+
 NO SUBPROCESS (Guideline 2.5.2)
-The build spawns no subprocess and writes no shell scripts: no Process(), no .command writer, no AppleScript, no external-binary probes. The sole bundled executable is Contents/MacOS/AgentDeck. Our CI (apple/scripts/verify-appstore-archive.sh) fails the build if a forbidden path string reappears in the shipped Mach-O, if an extra bundled executable is present, or if a home-relative-path entitlement is requested.
+The build spawns no subprocess and writes no shell scripts. The sole bundled executable is Contents/MacOS/AgentDeck. CI fails the archive if a subprocess path, extra executable, or home-relative-path entitlement appears.
 
 ENTITLEMENT RATIONALE
-• network.server — the app runs a local-only HTTP+WebSocket dashboard hub on Network.framework NWListener (port 9120, user-configurable in Settings → Port). It must be a server because it accepts inbound connections from three sources it cannot reach as a client: (1) the same user's iPhone/iPad running our AgentDeck companion, which finds the Mac via Bonjour over Wi-Fi; (2) AI-agent lifecycle hooks that POST session events to 127.0.0.1 from the user's own terminal; (3) the optional Elgato Stream Deck and Ulanzi plugins. Binding is loopback + local interfaces only — no firewall rules, no port mapping, no public-internet traffic — and endpoints are read-only dashboard reads plus that hook POST. To verify: Settings → Port shows the listening port, and "Pair iPad" shows the QR the companion scans to connect inbound.
+• network.server — the Swift daemon uses Network.framework NWListener for its local HTTP+WebSocket hub (port 9120): paired iPhone/iPad, localhost hooks, and optional deck plugins. It binds only loopback/local interfaces, with no firewall rule, port mapping, or public listener. Settings → Port shows the port.
 • Bonjour (_agentdeck._tcp) — lets the companion find the Mac without typing an IP. Explained via NSLocalNetworkUsageDescription.
 • device.bluetooth — optional iDotMatrix and Divoom Timebox Mini LED displays via CoreBluetooth, BLE central only. Inert unless the user pairs one.
 • device.audio-input — optional voice input. device.serial — optional ESP32 USB-serial displays; inert without such hardware.
-• weatherkit — after location consent, Dashboard shows current conditions with Apple's mark/legal link. Apple Weather stays in-app and in-memory; the portable feed uses MET Norway.
+• weatherkit — see the physical-Mac recording and exact reviewer path above. The Dashboard shows the  Weather mark linked to Apple's legal page; Apple Weather stays in-app and in-memory, while the portable feed uses MET Norway.
 • files.user-selected.read-write + bookmarks.app-scope — hook installation is fully opt-in: an NSAlert explains it, then an NSOpenPanel requires the user to pick ~/.claude/settings.json themselves. Only then do we take a security-scoped bookmark and write. A Remove button reverts it.
 
 PRIVACY / EVALUATION BACKENDS

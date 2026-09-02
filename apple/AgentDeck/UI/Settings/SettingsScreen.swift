@@ -944,7 +944,7 @@ struct SettingsScreen: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Weather context").font(.system(size: 12, weight: .semibold))
-                Text("One tap supplies WeatherKit forecasts to this Dashboard and paired offline-first readers. AgentDeck stores a coarse location locally; it does not use IP location.")
+                Text("Use Current Location shows Apple Weather on this Mac Dashboard. Paired offline-first readers use separately attributed MET Norway forecasts. AgentDeck stores a coarse location locally; it does not use IP location.")
                     .font(.system(size: 10)).foregroundStyle(TerrariumHUD.subtext)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Use Current Location") {

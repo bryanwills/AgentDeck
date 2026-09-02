@@ -155,6 +155,15 @@ AgentDeck은 독립적인 프로젝트이며 Anthropic, OpenAI, Google, SST, Cor
 claude code,ai,agent,dashboard,stream deck,monitoring,apme,openclaw,codex,ipad,companion,developer
 ```
 
+### What's New (v1.2.0, macOS — 심사 수정 문구)
+
+```
+• 기기 페어링: QR 코드를 스캔할 수 없는 기기가 연결을 시도하면 이제 '기기 페어링' 창에 나타나고, 하나씩 승인하거나 거절할 수 있습니다. 승인은 그 기기 하나에만 적용되며, 아무 조치가 없으면 기본값은 여전히 거절입니다.
+• Desktop Codex 세션이 내장 데몬에서도 AgentDeck의 다른 화면과 일치하는 고유 배지를 답니다.
+• 각 Mac이 일관된 네트워크 식별자를 광고해, 한 네트워크에 여러 대의 Mac이 깔끔하게 공존합니다.
+• 수정: 데몬이 소수점 타임스탬프를 보내도 페어링된 모바일 컴패니언의 세션 목록이 유지됩니다.
+```
+
 ### What's New (v1.1.0, macOS — 제출 문구)
 
 ```
@@ -478,6 +487,15 @@ AgentDeckは独立したプロジェクトであり、Anthropic、OpenAI、Googl
 claude code,ai,エージェント,ダッシュボード,stream deck,monitoring,apme,openclaw,codex,ipad,developer
 ```
 
+### What's New (v1.2.0, macOS — 審査修正文言)
+
+```
+• デバイスをペアリング: QRコードをスキャンできないデバイスが接続を試みると、「デバイスをペアリング」ウィンドウに表示され、1台ずつ承認または却下できます。承認はそのデバイスだけに適用され、何もしなければデフォルトは引き続き拒否です。
+• Desktop Codex セッションが内蔵デーモンでも、AgentDeckのほかの画面と一致する固有のバッジを表示します。
+• 各Macが一貫したネットワーク識別子をアドバタイズし、1つのネットワークで複数のMacが共存できます。
+• 修正: デーモンが小数点付きタイムスタンプを送信しても、ペアリング済みモバイルコンパニオンのセッション一覧が表示され続けます。
+```
+
 ### What's New (v1.1.0, macOS — 提出文言)
 
 ```
@@ -797,6 +815,15 @@ AgentDeck is independent and is not affiliated with or endorsed by Anthropic, Op
 
 ```
 claude code,ai,agent,dashboard,monitoring,apme,openclaw,codex,ipad,stream deck,developer
+```
+
+### What's New (v1.2.0, macOS — review-corrected copy)
+
+```
+• Pair a Device: devices that cannot scan a QR code now appear in the Pair a Device window when they try to connect, and you approve or dismiss each one. Approval is scoped to that specific device, and the default with no action remains refusal.
+• Desktop Codex sessions now wear their own badge on the built-in daemon, matching the rest of AgentDeck.
+• Each Mac now advertises a consistent network identity, so several Macs coexist cleanly on one network.
+• Fixed: paired mobile companions now keep the session roster visible when a daemon sends fractional timestamps.
 ```
 
 ### What's New (v1.1.0, macOS — submission copy)
