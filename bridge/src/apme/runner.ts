@@ -15,7 +15,7 @@ import { spawn } from 'child_process';
 import { taskGradeability, notGradeableNotes } from './task-gradeability.js';
 import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
-import { debug } from '../logger.js';
+import { debug, log } from '../logger.js';
 import type { ApmeStore } from './store.js';
 import type { ApmeConfig, ApmeJudgeConfig, ApmeJudgeBackend } from './settings.js';
 import { loadApmeConfig, shouldJudge, judgeBackendSupported, DEFAULT_APME_CONFIG } from './settings.js';
@@ -26,8 +26,15 @@ import { runSampleScorers } from './scorers/index.js';
 import type { ApmeRunRow, ParsedJudge } from './types.js';
 import { execSync } from 'child_process';
 
-/** Judge attempts per task per process before the backlog drain stops offering it. */
+/** Judge attempts per task before the backlog drain stops offering it. */
 const TASK_EVAL_MAX_ATTEMPTS = 2;
+/** How long a task stays parked after that. A park that lasted the whole
+ *  process meant one busy hour at the judge parked the entire backlog: the
+ *  drain fed three tasks per 30 s tick to a local model that answers one at a
+ *  time, requests queued past the 60 s call timeout, every task burned its
+ *  two attempts, and the drain went from 140 tasks/hour to zero with 289
+ *  still pending and not one line in the log (2026-09-03). */
+export const TASK_EVAL_PARK_MS = 30 * 60_000;
 
 export interface EvalJob {
   runId: string;
@@ -246,20 +253,50 @@ export class ApmeRunner {
     // A task whose judge call failed (unparseable verdict, backend error)
     // leaves no row behind, so the backlog drain would offer it again every
     // sweep. Two attempts per process; the next daemon start gets two more.
-    if ((this.taskEvalFailures.get(job.taskId) ?? 0) >= TASK_EVAL_MAX_ATTEMPTS) {
-      debug('APME', `skip task eval taskId=${job.taskId.slice(0, 8)} — ${TASK_EVAL_MAX_ATTEMPTS} failed attempts this process`);
-      return;
+    const failed = this.taskEvalFailures.get(job.taskId);
+    if (failed && failed.attempts >= TASK_EVAL_MAX_ATTEMPTS) {
+      if (Date.now() - failed.lastAt < TASK_EVAL_PARK_MS) {
+        debug('APME', `skip task eval taskId=${job.taskId.slice(0, 8)} — parked after ${failed.attempts} failed attempts`);
+        return;
+      }
+      // The park expired: the judge may be back. Two fresh attempts.
+      this.taskEvalFailures.delete(job.taskId);
     }
     this.runningTaskIds.add(job.taskId);
     void this.runTaskEval(job).then((ok) => {
-      if (ok === false) this.taskEvalFailures.set(job.taskId, (this.taskEvalFailures.get(job.taskId) ?? 0) + 1);
+      if (ok !== false) return;
+      const attempts = (this.taskEvalFailures.get(job.taskId)?.attempts ?? 0) + 1;
+      this.taskEvalFailures.set(job.taskId, { attempts, lastAt: Date.now() });
+      if (attempts >= TASK_EVAL_MAX_ATTEMPTS) this.noteTaskParked(job.taskId);
     }).finally(() => {
       this.runningTaskIds.delete(job.taskId);
     });
   }
 
-  /** Failed judge attempts per task, this process. See `enqueueTask`. */
-  private readonly taskEvalFailures = new Map<string, number>();
+  /** Failed judge attempts per task and when the last one was; in-memory on
+   *  purpose, like `judgeFailures`. See `enqueueTask`. */
+  private readonly taskEvalFailures = new Map<string, { attempts: number; lastAt: number }>();
+  /** Why the most recent task judge call failed — the one fact the log needs
+   *  when the backlog stops moving. */
+  private lastTaskEvalFailure = '';
+  private parkedTaskCount = 0;
+
+  /** Task judge calls in flight right now, whatever enqueued them. The
+   *  backlog drain reads this so it never piles onto a judge that is still
+   *  answering — the local backends answer one prompt at a time. */
+  get inFlightTaskEvals(): number {
+    return this.runningTaskIds.size;
+  }
+
+  /** One visible line per decade of parks (the 1st, 10th, 100th…): enough to
+   *  see a stalled judge in the daemon log, never a line per task. */
+  private noteTaskParked(taskId: string): void {
+    this.parkedTaskCount++;
+    const n = this.parkedTaskCount;
+    if (n === 1 || Number.isInteger(Math.log10(n))) {
+      log(`APME task judge: ${n} task(s) parked for ${Math.round(TASK_EVAL_PARK_MS / 60_000)} min after ${TASK_EVAL_MAX_ATTEMPTS} failed attempts (latest ${taskId.slice(0, 8)}: ${this.lastTaskEvalFailure || 'unknown'})`);
+    }
+  }
 
   /** Resolves `false` when the judge was called and produced nothing usable
    *  (a failed attempt worth counting); `true` or `undefined` otherwise. */
@@ -349,6 +386,7 @@ export class ApmeRunner {
         : await callJudgeWithMeta(judgePrompt, cfg.judge);
       const parsed = parseJudgeJson(judgeResult.text);
       if (!parsed) {
+        this.lastTaskEvalFailure = `unparseable verdict from ${judgeResult.effectiveLabel}`;
         debug('APME', `runTaskEval parse failed task=${taskId.slice(0, 8)}`);
         return false;
       }
@@ -451,6 +489,7 @@ export class ApmeRunner {
         }
       }
     } catch (err) {
+      this.lastTaskEvalFailure = String(err).slice(0, 160);
       debug('APME', `task eval error taskId=${taskId.slice(0, 8)}: ${String(err)}`);
       return false;
     }

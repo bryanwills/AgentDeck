@@ -207,6 +207,13 @@ export interface CodexTurnCompletion {
   completedAt: number;
   /** `last_agent_message` of that record, empty when Codex wrote none. */
   text: string;
+  /** The failure Codex wrote on that record, when the turn ended in one
+   *  (an API 404, a usage limit). Such a turn fires no Stop hook at all —
+   *  measured 2026-09-03, six consecutive turns against a dead endpoint all
+   *  reached the next prompt open and read as dropped hooks. */
+  error?: string;
+  /** Codex's own classification of that failure, e.g. `usage_limit_exceeded`. */
+  errorKind?: string;
 }
 
 /**
@@ -250,7 +257,12 @@ export function codexTurnCompletionSince(sessionId: string, sinceMs: number, ses
     if (!payload || typeof payload !== 'object' || payload.type !== 'task_complete') continue;
     if (!Number.isFinite(ts)) continue; // a completion with no time cannot be placed
     const text = typeof payload.last_agent_message === 'string' ? payload.last_agent_message.trim() : '';
-    return { completedAt: ts, text };
+    const failure = payload.error as Record<string, unknown> | undefined;
+    const error = failure && typeof failure === 'object' ? cleanErrorText(failure.message) : undefined;
+    const errorKind = failure && typeof failure === 'object' && typeof failure.codex_error_info === 'string'
+      ? failure.codex_error_info
+      : undefined;
+    return { completedAt: ts, text, ...(error ? { error } : {}), ...(errorKind ? { errorKind } : {}) };
   }
   return null;
 }

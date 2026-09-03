@@ -27,7 +27,7 @@ import type { AgentType, TelemetrySpan, ApmeSampleEventRow, TrajectoryEventKind,
 import { AGENT_IDLE_GAP_MS, deriveTaskTitle, isPricedModel, normalizeModelProvider, priceUsd } from '@agentdeck/shared';
 import type { ApmeHwSampler } from './hw-sampler.js';
 import { classifyRunSmart, computeSignals, classify } from './classifier.js';
-import { readOpenTurnEvidence, type OpenTurnEvidence } from './claude-transcript-reader.js';
+import { readOpenTurnEvidence, claudeTurnCompletionSince, type OpenTurnEvidence, type ClaudeTurnCompletion } from './claude-transcript-reader.js';
 import { codexTurnCompletionSince, type CodexTurnCompletion } from '../codex-rollout-response.js';
 
 export interface OpenRunInput {
@@ -67,6 +67,20 @@ const DUPLICATE_TURN_OPEN_WINDOW_MS = 15_000;
  *  a cancel milliseconds into a turn reads as belonging to the previous one.
  *  Matches the watchdog's `TURN_OPEN_SLACK_MS` — same comparison, same risk. */
 const TURN_INTERRUPT_SLACK_MS = 2_000;
+
+/** How long after a turn closed a late-arriving reply may still be attached
+ *  to it once the run itself is gone from memory — the deferred transcript
+ *  re-read tops out at 7.5 s; a minute leaves room for a slow disk. */
+const LATE_REPLY_WINDOW_MS = 60_000;
+
+/** What the next prompt learns about the turn it displaces. */
+interface DisplacedTurnVerdict {
+  source: TurnEndSource;
+  /** The agent's own end time for the turn, when its record carries one. */
+  endedAt?: number;
+  /** The reply the agent's record holds for the turn, when the Stop lost it. */
+  response?: string;
+}
 
 /** The constant (and its measurement) lives in the shared SSOT — both daemons
  *  enforce it. The timer here is armed in `closeTurn` (work finished, idle
@@ -268,6 +282,10 @@ export class ApmeCollector {
      *  `rehydrateOpenRuns`. Injectable for tests; the default reads the
      *  rollout tail under `~/.codex/sessions`. */
     private readonly codexCompletionProbe: (sessionId: string, sinceMs: number) => CodexTurnCompletion | null = codexTurnCompletionSince,
+    /** Whether a Claude turn open at startup ended per its transcript — the
+     *  Claude half of the same question. Injectable for tests; the default
+     *  locates the transcript under `~/.claude/projects` by session id. */
+    private readonly claudeCompletionProbe: (sessionId: string, projectPath: string | null, sinceMs: number) => ClaudeTurnCompletion | null = claudeTurnCompletionSince,
   ) {}
 
   /** Re-adopt every run the store still holds open, so the daemon that just
@@ -374,15 +392,31 @@ export class ApmeCollector {
           hasResponse: typeof openTurn.response === 'string' && openTurn.response.length > 0,
         });
         out.turns++;
+        // The agent's own record says whether the Stop this turn was owed
+        // ever happened. Closed at the RECORD's time, not now: the daemon was
+        // down in between, and that gap is nobody's turn duration.
         if (run.agentType === 'codex-cli') {
           let completion: CodexTurnCompletion | null = null;
           try { completion = this.codexCompletionProbe(run.sessionId, Number(openTurn.started_at)); }
           catch { completion = null; }
           if (completion) {
             if (completion.text) this.setTurnResponse(run.sessionId, completion.text);
-            this.noteTurnStop(run.sessionId, { synthetic: true });
+            // A turn Codex itself failed (usage limit, dead endpoint) fires no
+            // Stop and is not a dropped hook.
+            const source: TurnEndSource = completion.error ? 'aborted' : 'synthetic_stop';
+            this.closeTurn(run.sessionId, source, completion.completedAt);
             out.recovered++;
-            debug('APME', `rehydrate: codex turn ${String(openTurn.id).slice(0, 8)} completed at ${new Date(completion.completedAt).toISOString()} per rollout — closed as synthetic_stop`);
+            debug('APME', `rehydrate: codex turn ${String(openTurn.id).slice(0, 8)} ${completion.error ? 'failed' : 'completed'} at ${new Date(completion.completedAt).toISOString()} per rollout — closed as ${source}`);
+          }
+        } else if (run.agentType === 'claude-code') {
+          let completion: ClaudeTurnCompletion | null = null;
+          try { completion = this.claudeCompletionProbe(run.sessionId, run.projectPath ?? null, Number(openTurn.started_at)); }
+          catch { completion = null; }
+          if (completion) {
+            if (completion.text) this.setTurnResponse(run.sessionId, completion.text);
+            this.closeTurn(run.sessionId, completion.source, completion.endedAt);
+            out.recovered++;
+            debug('APME', `rehydrate: claude turn ${String(openTurn.id).slice(0, 8)} ended at ${new Date(completion.endedAt).toISOString()} per transcript — closed as ${completion.source}`);
           }
         }
       } else if (activeTask && lastTurn) {
@@ -393,7 +427,7 @@ export class ApmeCollector {
       }
     }
     if (out.runs > 0) {
-      debug('APME', `rehydrated ${out.runs} open run(s): ${out.tasks} task(s), ${out.turns} open turn(s), ${out.armed} idle timer(s) re-armed, ${out.recovered} codex turn(s) closed from rollout`);
+      debug('APME', `rehydrated ${out.runs} open run(s): ${out.tasks} task(s), ${out.turns} open turn(s), ${out.armed} idle timer(s) re-armed, ${out.recovered} turn(s) closed from the agent's own record`);
     }
     return out;
   }
@@ -440,6 +474,7 @@ export class ApmeCollector {
     if (!this.store.enabled) return;
     const runId = this.sessionToRun.get(sessionId);
     if (!runId) return;
+    this.heard(sessionId);
     const event = normalizeHookEventName(rawEvent);
     const toolName = typeof data.tool_name === 'string' ? data.tool_name : null;
 
@@ -482,7 +517,9 @@ export class ApmeCollector {
       // and no watchdog recovered it either, or the synthetic Stop would have
       // closed it already. That is the unrecovered-loss bucket, UNLESS the
       // user cancelled it, in which case no Stop was ever owed.
-      this.closeTurn(sessionId, this.resolveDisplacedTurnSource(sessionId, data));
+      const displaced = this.resolveDisplacedTurn(sessionId, data);
+      if (displaced.response) this.setTurnResponse(sessionId, displaced.response);
+      this.closeTurn(sessionId, displaced.source, displaced.endedAt);
       // Open new turn
       const turnIndex = prevIndex + 1;
       const run = this.store.getRun(runId);
@@ -659,6 +696,7 @@ export class ApmeCollector {
    *  a synthetic Stop racing a real one cannot overwrite the real attribution. */
   noteTurnStop(sessionId: string, opts: { synthetic?: boolean; interrupted?: boolean; aborted?: boolean } = {}): void {
     if (!this.store.enabled) return;
+    this.heard(sessionId);
     // `interrupted` and `aborted` both outrank `synthetic`: neither ending
     // produces a real Stop, so each can only ever arrive AS a synthetic one,
     // and reading the flags the other way round would file every user cancel
@@ -694,20 +732,38 @@ export class ApmeCollector {
    *     model turn and owes exactly one Stop, which closes the LAST of them.
    *     A displaced row with no assistant record behind it at all is that
    *     artifact, not a lost hook. */
-  private resolveDisplacedTurnSource(sessionId: string, data: Record<string, unknown>): TurnEndSource {
+  private resolveDisplacedTurn(sessionId: string, data: Record<string, unknown>): DisplacedTurnVerdict {
     const turn = this.sessionToTurn.get(sessionId);
     // No open turn: closeTurn no-ops, so the value is immaterial.
-    if (!turn) return 'next_prompt';
-    // Claude-only: the marker and the JSONL shape are Claude Code's.
-    if (this.sessionToAgentType.get(sessionId) !== 'claude-code') return 'next_prompt';
+    if (!turn) return { source: 'next_prompt' };
+    const agentType = this.sessionToAgentType.get(sessionId);
+    // Codex: the rollout is the record. Measured over one week (2026-09-03),
+    // 23 codex turns reached the next prompt open; the rollout held a
+    // completed reply for 16 of them (the Stop alone was lost), a failure for
+    // 2 (a dead endpoint — no Stop is ever fired for those), and nothing for
+    // 5. Only the last five were dropped hooks; the rest are recovered here
+    // with the reply and Codex's own end time, the way the watchdog recovers
+    // a Claude turn.
+    if (agentType === 'codex-cli') {
+      try {
+        const completion = this.codexCompletionProbe(sessionId, turn.startedAt - TURN_INTERRUPT_SLACK_MS);
+        if (!completion) return { source: 'next_prompt' };
+        if (completion.error) return { source: 'aborted', endedAt: completion.completedAt };
+        return { source: 'synthetic_stop', endedAt: completion.completedAt, response: completion.text || undefined };
+      } catch {
+        return { source: 'next_prompt' };
+      }
+    }
+    // Claude: the marker and the JSONL shape are Claude Code's.
+    if (agentType !== 'claude-code') return { source: 'next_prompt' };
     const transcriptPath = typeof data.transcript_path === 'string' ? data.transcript_path : '';
-    if (!transcriptPath) return 'next_prompt';
+    if (!transcriptPath) return { source: 'next_prompt' };
     try {
       const evidence = this.openTurnProbe(transcriptPath, turn.startedAt - TURN_INTERRUPT_SLACK_MS);
       // An unreadable transcript is no evidence of anything — never guess.
-      if (!evidence) return 'next_prompt';
-      if (evidence.interruptedAt != null) return 'interrupted';
-      if (evidence.abortedAt != null) return 'aborted';
+      if (!evidence) return { source: 'next_prompt' };
+      if (evidence.interruptedAt != null) return { source: 'interrupted' };
+      if (evidence.abortedAt != null) return { source: 'aborted' };
       // Ordered last on purpose: a cancelled or aborted turn that also wrote
       // nothing is still a cancel or an abort, not a superseded prompt.
       //
@@ -718,17 +774,17 @@ export class ApmeCollector {
       // tens of ms out of sequence), so one inverted stamp near the tail could
       // truncate the walk and hide the assistant work behind it. A turn that
       // called tools demonstrably ran whatever the transcript says.
-      if (!evidence.sawAssistant && turn.toolCalls === 0) return 'superseded';
-      return 'next_prompt';
+      if (!evidence.sawAssistant && turn.toolCalls === 0) return { source: 'superseded' };
+      return { source: 'next_prompt' };
     } catch {
-      return 'next_prompt';
+      return { source: 'next_prompt' };
     }
   }
 
   /** Close the current turn for a session (called on Stop, new prompt, or
    *  session end). `source` records which of those it was — see
    *  `TurnEndSource`. */
-  private closeTurn(sessionId: string, source: TurnEndSource): void {
+  private closeTurn(sessionId: string, source: TurnEndSource, endedAt: number = Date.now()): void {
     const turn = this.sessionToTurn.get(sessionId);
     if (!turn) return;
     this.sessionToLastTurnId.set(sessionId, turn.id);
@@ -738,7 +794,7 @@ export class ApmeCollector {
     const gitAfter = readGitHead(projectPath);
     try {
       this.store.updateTurn(turn.id, {
-        endedAt: Date.now(),
+        endedAt,
         toolCalls: turn.toolCalls,
         filesModified: turn.filesModified,
         filesCreated: turn.filesCreated,
@@ -749,9 +805,12 @@ export class ApmeCollector {
     } catch (err) {
       debug('APME', `closeTurn failed: ${String(err)}`);
     }
-    // Idle starts when the turn ends. The timer is cleared by the next turn
-    // open (still working) or by closeTask (boundary reached another way).
-    this.armIdleGapTimer(sessionId);
+    // Idle starts when the turn ends — at the turn's OWN end time, so a turn
+    // closed from the agent's record after the fact (rehydrate, next-prompt
+    // recovery) is already as idle as the record says it is. The timer is
+    // cleared by the next turn open (still working) or by closeTask
+    // (boundary reached another way).
+    this.armIdleGapTimer(sessionId, Math.max(0, this.idleGapMs - Math.max(0, Date.now() - endedAt)));
   }
 
   /** Get the current active turn ID for a session (if any). */
@@ -1021,8 +1080,38 @@ export class ApmeCollector {
    *  whose user simply stepped away mid-turn, and the row would then be closed
    *  underneath the collector that is still writing to it. */
   isLiveRun(runId: string): boolean {
-    for (const id of this.sessionToRun.values()) if (id === runId) return true;
+    for (const [sessionId, id] of this.sessionToRun) {
+      if (id !== runId) continue;
+      // Adoption at startup is PROVISIONAL: a run re-adopted from the store
+      // whose session has not sent a single hook since is owned in name only.
+      // Counting it live forever meant a session that ended while the daemon
+      // was down could never be reaped — its run had no Stop coming, no idle
+      // timer (those arm on turn close), and a reaper that deferred to us.
+      // Measured 2026-09-03: two such runs open 17 hours after the restart.
+      return !this.rehydratedSessions.has(sessionId);
+    }
     return false;
+  }
+
+  /** Drop every in-memory edge to `runId` after the reaper closed it in the
+   *  store, so a hook that arrives later opens a fresh run instead of writing
+   *  turns into a row that is already finalised. */
+  releaseRun(runId: string): void {
+    for (const [sessionId, id] of [...this.sessionToRun]) {
+      if (id !== runId) continue;
+      this.clearIdleGapTimer(sessionId);
+      this.sessionToRun.delete(sessionId);
+      this.sessionToTask.delete(sessionId);
+      this.sessionToTurn.delete(sessionId);
+      this.sessionToLastTurnId.delete(sessionId);
+      this.rehydratedSessions.delete(sessionId);
+    }
+    this.runTaskCount.delete(runId);
+  }
+
+  /** The session spoke: an adopted run is now owned for real. */
+  private heard(sessionId: string): void {
+    this.rehydratedSessions.delete(sessionId);
   }
 
   /** Agent type established for a session at `openRun` (survives closeRun so a
@@ -1196,7 +1285,16 @@ export class ApmeCollector {
    *  Used as fallback when Stop hook doesn't fire (PTY output capture). */
   setLastClosedTurnResponse(sessionId: string, response: string): void {
     if (!this.store.enabled) return;
-    const turnId = this.sessionToLastTurnId.get(sessionId);
+    // The in-memory edge is dropped at closeRun, and a one-turn session
+    // (`claude -p`, a spawned worker) sends its SessionEnd 80–130 ms after
+    // its Stop — before the deferred transcript re-read (1.5 s) that exists
+    // because the Stop's own read found nothing. The reply then arrived to
+    // no turn and was dropped: 6 of 13 such sessions in one day (2026-09-03).
+    // The store still knows the turn; a bounded window keeps a late reply
+    // from landing on a session's turn from an earlier life.
+    const turnId = this.sessionToLastTurnId.get(sessionId)
+      ?? this.store.latestClosedTurnIdForSession(sessionId, Date.now() - LATE_REPLY_WINDOW_MS)
+      ?? undefined;
     if (!turnId) return;
     const existing = this.store.getTurn(turnId);
     if (existing?.response) return;

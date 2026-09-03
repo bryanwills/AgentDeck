@@ -114,6 +114,14 @@ const APME_ABANDONED_RUN_STALE_SEC = Math.max(
   600,
   Number(process.env.AGENTDECK_APME_ABANDON_SEC) || 7200,
 );
+/** Backlog tasks handed to the judge per eval tick when it is idle — see the drain. */
+const APME_TASK_JUDGE_DRAIN_PER_TICK = 1;
+/** How often a judge backend that last probed unavailable is probed again.
+ *  The probe used to run once, at startup; a local MLX server busy with
+ *  someone else's inference at that moment answered nothing inside the
+ *  probe's 8 s, and the backlog drain — gated on that one answer — stayed
+ *  off for the life of the process (2026-09-03, 289 tasks pending). */
+const APME_JUDGE_REPROBE_MS = 5 * 60_000;
 import { VoiceManager } from './voice.js';
 import { VoiceAssistantManager } from './voice-assistant.js';
 import {
@@ -4458,7 +4466,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
     try {
       const r = apme.collector.rehydrateOpenRuns();
       if (r.runs > 0) {
-        log(`[agentdeck] APME resumed ${r.runs} open run(s) from the store — ${r.tasks} task(s), ${r.turns} open turn(s), ${r.armed} idle-gap timer(s) re-armed${r.recovered > 0 ? `, ${r.recovered} codex turn(s) closed from rollout` : ''}`);
+        log(`[agentdeck] APME resumed ${r.runs} open run(s) from the store — ${r.tasks} task(s), ${r.turns} open turn(s), ${r.armed} idle-gap timer(s) re-armed${r.recovered > 0 ? `, ${r.recovered} turn(s) closed from the agent's own record` : ''}`);
       }
     } catch (err) {
       log(`[agentdeck] APME rehydrate failed: ${String(err)}`);
@@ -6529,6 +6537,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       core.broadcast(evalEvent);
     });
 
+    let judgeReprobeInFlight = false;
     const apmeEvalTimer = setInterval(() => {
       // 1. Enqueue unevaluated runs for deterministic + judge
       const pending = apme!.store.listUnevaluatedRuns(5);
@@ -6544,8 +6553,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       //     actually reachable, so an outage does not turn into a retry storm.
       //     Bounded to 30 days: older rows predate response capture and would
       //     mostly be declined anyway.
-      if (apme!.runner.lastBackendProbe?.status === 'ready') {
-        const backlog = apme!.store.listTasksNeedingSummary(3, Date.now() - 30 * 86_400_000);
+      //     One at a time, and only when nothing is already at the judge:
+      //     the local backends answer serially, so three per tick queued
+      //     past the call timeout, burned every task's attempts, and parked
+      //     the whole backlog (289 tasks, 2026-09-03). The live close path
+      //     still enqueues on its own; the drain yields to it.
+      const probe = apme!.runner.lastBackendProbe;
+      if (probe && probe.status !== 'ready' && Date.now() - probe.checkedAt >= APME_JUDGE_REPROBE_MS && !judgeReprobeInFlight) {
+        judgeReprobeInFlight = true;
+        void apme!.runner.refreshBackendProbe(loadApmeConfig().judge).then((status) => {
+          if (status.status === 'ready') {
+            log(`[agentdeck] APME judge ready again: ${status.backend}${status.model ? ` (${status.model})` : ''} — the task backlog resumes`);
+          }
+        }).catch(() => {}).finally(() => { judgeReprobeInFlight = false; });
+      }
+      if (probe?.status === 'ready' && apme!.runner.inFlightTaskEvals === 0) {
+        const backlog = apme!.store.listTasksNeedingSummary(APME_TASK_JUDGE_DRAIN_PER_TICK, Date.now() - 30 * 86_400_000);
         for (const t of backlog) {
           apme!.runner.enqueueTask({ runId: t.runId, taskId: t.id, ...(t.taskCategory ? { category: t.taskCategory } : {}) });
         }
@@ -6618,6 +6641,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       for (const run of abandoned) {
         if (apme!.collector.isLiveRun(run.id)) continue; // still owned by us
         const closedTasks = apme!.store.reapAbandonedRun(run.id, run.lastActivity);
+        // A run adopted at startup whose session never spoke is reapable
+        // (see `isLiveRun`), and its in-memory edges must go with the row.
+        apme!.collector.releaseRun(run.id);
         for (const task of closedTasks) {
           // Judge only what there is something to judge — the one rule in
           // task-gradeability.ts, which the runner applies again and which

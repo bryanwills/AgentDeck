@@ -3556,7 +3556,7 @@ apme
       log(`  ${r.agentType.slice(0, 14).padEnd(14)} ${String(r.total).padEnd(7)} ${String(r.stop).padEnd(7)} ${String(r.syntheticStop).padEnd(7)} ${String(r.nextPrompt).padEnd(7)} ${String(r.interrupted).padEnd(6)} ${String(r.aborted).padEnd(6)} ${String(r.superseded).padEnd(7)} ${String(r.sessionEnd).padEnd(8)} ${String(r.runClose).padEnd(7)} ${String(r.open).padEnd(6)} ${String(r.preInstrument).padEnd(6)} ${rate}`);
     }
     log('');
-    log('  Synth  = Stop hook dropped, watchdog recovered it from the transcript');
+    log("  Synth  = Stop hook dropped, recovered from the agent's own record (transcript watchdog; rollout at the next prompt for Codex)");
     log('  NoStop = Stop hook dropped and nothing recovered it (closed by the next prompt)');
     log('  Esc    = user cancelled the turn — Claude Code owes no Stop, so not a loss');
     log('  Abort  = usage limit / auth / API error ended the turn — no Stop is fired for those');

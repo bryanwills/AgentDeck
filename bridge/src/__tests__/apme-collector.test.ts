@@ -522,3 +522,81 @@ describe('ApmeCollector', () => {
     expect(store.listTasksForRun(runId!)[0]).toMatchObject({ costUsd: null, costKnown: false });
   });
 });
+
+describe('next-prompt close reads the agent record', () => {
+  let store!: ApmeStore;
+  beforeEach(async () => { store = await makeStore(); });
+  afterEach(() => cleanup(store));
+
+  it('codex: a turn open at the next prompt takes its reply and end time from the rollout', () => {
+    // 23 codex turns reached the next prompt open in one week (2026-09-03);
+    // the rollout held a completed reply for 16 of them. Only the Stop was
+    // lost — the turn is recovered the way the watchdog recovers a Claude one.
+    const completedAt = Date.now() - 30_000;
+    const probe = () => ({ completedAt, text: '완료했습니다.' });
+    const collector = new ApmeCollector(store, undefined, undefined, undefined, probe);
+    const runId = collector.openRun({ sessionId: 'cx-1', agentType: 'codex-cli', projectName: 'p' })!;
+    collector.ingestHook('cx-1', 'UserPromptSubmit', { prompt: 'first' });
+    collector.ingestHook('cx-1', 'UserPromptSubmit', { prompt: 'second' });
+    const turns = store.listTurns(runId);
+    expect(turns.length).toBe(2);
+    expect(turns[0].end_source).toBe('synthetic_stop');
+    expect(turns[0].ended_at).toBe(completedAt);
+    expect(turns[0].response).toBe('완료했습니다.');
+  });
+
+  it('codex: a turn the rollout says failed is aborted — no Stop was ever owed', () => {
+    const completedAt = Date.now() - 10_000;
+    const probe = () => ({ completedAt, text: '', error: 'unexpected status 404 Not Found', errorKind: 'other' });
+    const collector = new ApmeCollector(store, undefined, undefined, undefined, probe);
+    const runId = collector.openRun({ sessionId: 'cx-2', agentType: 'codex-cli', projectName: 'p' })!;
+    collector.ingestHook('cx-2', 'UserPromptSubmit', { prompt: 'retry' });
+    // (The measured case retyped the SAME prompt minutes apart; inside the
+    // duplicate-open window an identical prompt is folded, so vary it here.)
+    collector.ingestHook('cx-2', 'UserPromptSubmit', { prompt: 'retry again' });
+    const turns = store.listTurns(runId);
+    expect(turns[0].end_source).toBe('aborted');
+    expect(turns[0].ended_at).toBe(completedAt);
+    expect(turns[0].response).toBeFalsy();
+  });
+
+  it('codex: no record of the turn ending is still an unrecovered Stop loss', () => {
+    const collector = new ApmeCollector(store, undefined, undefined, undefined, () => null);
+    const runId = collector.openRun({ sessionId: 'cx-3', agentType: 'codex-cli', projectName: 'p' })!;
+    collector.ingestHook('cx-3', 'UserPromptSubmit', { prompt: 'a' });
+    collector.ingestHook('cx-3', 'UserPromptSubmit', { prompt: 'b' });
+    expect(store.listTurns(runId)[0].end_source).toBe('next_prompt');
+  });
+});
+
+describe('a reply that arrives after the run closed', () => {
+  let store!: ApmeStore;
+  beforeEach(async () => { store = await makeStore(); });
+  afterEach(() => cleanup(store));
+
+  it('still lands on the session\'s last turn', () => {
+    // A one-turn worker session sends SessionEnd 80–130 ms after its Stop,
+    // before the deferred transcript re-read that exists because the Stop's
+    // own read found nothing. 6 of 13 such sessions in one day lost their
+    // reply that way (2026-09-03).
+    const collector = new ApmeCollector(store);
+    const runId = collector.openRun({ sessionId: 'late-1', agentType: 'claude-code', projectName: 'p' })!;
+    collector.ingestHook('late-1', 'UserPromptSubmit', { prompt: 'work' });
+    collector.noteTurnStop('late-1');
+    collector.closeRun('late-1', 0);
+    collector.setLastClosedTurnResponse('late-1', '검증 전부 통과.');
+    expect(store.listTurns(runId)[0].response).toBe('검증 전부 통과.');
+  });
+
+  it('never reaches a turn that closed long ago', () => {
+    const collector = new ApmeCollector(store);
+    const runId = collector.openRun({ sessionId: 'late-2', agentType: 'claude-code', projectName: 'p' })!;
+    collector.ingestHook('late-2', 'UserPromptSubmit', { prompt: 'work' });
+    collector.noteTurnStop('late-2');
+    collector.closeRun('late-2', 0);
+    const turnId = String(store.listTurns(runId)[0].id);
+    store.updateTurn(turnId, { endedAt: Date.now() - 10 * 60_000 });
+    collector.setLastClosedTurnResponse('late-2', 'stale');
+    expect(store.listTurns(runId)[0].response).toBeFalsy();
+  });
+});

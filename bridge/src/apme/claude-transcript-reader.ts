@@ -16,9 +16,12 @@
  * `tool_only`) is the fallback.
  */
 
-import { readFileSync, openSync, readSync, fstatSync, closeSync } from 'fs';
+import { readFileSync, openSync, readSync, fstatSync, closeSync, existsSync, readdirSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 import { debug } from '../logger.js';
 import { isClaudeInterruptRecord } from '../claude-interrupt-marker.js';
+import { lastAssistantTextFromTranscript } from '../session-transcript-timeline.js';
 
 export interface LastTurnExcerpt {
   userPrompt: string;
@@ -333,4 +336,78 @@ function extractAssistantBlocks(content: unknown): { text: string; toolUses: num
     else if (b.type === 'tool_use') toolUses += 1;
   }
   return { text: parts.join('\n'), toolUses };
+}
+
+/**
+ * Where Claude Code keeps a session's transcript, found by id rather than
+ * carried on a hook. Claude names the project directory after the working
+ * directory with every non-alphanumeric character replaced by `-`
+ * (`/Users/x/github/foo` → `-Users-x-github-foo`); that guess is tried first
+ * and a scan of every project directory covers a session whose cwd is not
+ * recorded (or was recorded differently). Null when no file exists — never
+ * a guessed path, since the callers read it as evidence.
+ */
+export function locateClaudeTranscript(
+  sessionId: string,
+  projectPath?: string | null,
+  projectsRoot: string = join(homedir(), '.claude', 'projects'),
+): string | null {
+  if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return null;
+  const file = `${sessionId}.jsonl`;
+  if (projectPath) {
+    const guess = join(projectsRoot, projectPath.replace(/[^a-zA-Z0-9]/g, '-'), file);
+    if (existsSync(guess)) return guess;
+  }
+  let dirs: string[];
+  try { dirs = readdirSync(projectsRoot); } catch { return null; }
+  for (const dir of dirs) {
+    const candidate = join(projectsRoot, dir, file);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** How a Claude turn that opened at or after `sinceMs` ended, per its own
+ *  transcript — the same three answers the next-prompt close distinguishes. */
+export interface ClaudeTurnCompletion {
+  /** Transcript stamp of the record that ended the turn, epoch ms. */
+  endedAt: number;
+  /** Which signal the transcript proves: the model finished (`synthetic_stop`,
+   *  since no Stop hook reached us), the user cancelled, or the client aborted. */
+  source: 'synthetic_stop' | 'interrupted' | 'aborted';
+  /** The turn's final assistant text; empty for a cancel or abort. */
+  text: string;
+}
+
+/**
+ * Did the Claude turn that opened at or after `sinceMs` END, per the transcript?
+ *
+ * Answers the question `rehydrateOpenRuns` has for a turn it found open in the
+ * store: the daemon that would have taken its Stop is gone, and the transcript
+ * is the only record left of whether that Stop was ever owed. Null when the
+ * transcript is missing, unreadable, or its tail is still mid-turn (an
+ * assistant `tool_use` or a `user` tool_result) — the session may be alive and
+ * the turn genuinely open, so nothing is claimed. Measured before it was
+ * written (2026-09-03): two worker sessions whose final `end_turn` landed 75
+ * minutes before a restart were adopted with their turn open and stayed open
+ * for 17 hours, because the adopted run counted as live to the reaper and no
+ * hook was ever coming.
+ */
+export function claudeTurnCompletionSince(
+  sessionId: string,
+  projectPath: string | null | undefined,
+  sinceMs: number,
+  projectsRoot?: string,
+): ClaudeTurnCompletion | null {
+  const path = locateClaudeTranscript(sessionId, projectPath, projectsRoot);
+  if (!path) return null;
+  const probe = readTurnEndProbe(path);
+  if (!probe || probe.timestampMs == null || probe.timestampMs < sinceMs) return null;
+  if (probe.interrupted) return { endedAt: probe.timestampMs, source: 'interrupted', text: '' };
+  if (probe.role !== 'assistant') return null;
+  if (probe.stopReason === CLIENT_ABORT_STOP_REASON) return { endedAt: probe.timestampMs, source: 'aborted', text: '' };
+  if (probe.stopReason !== 'end_turn') return null;
+  let text = '';
+  try { text = lastAssistantTextFromTranscript(path); } catch { text = ''; }
+  return { endedAt: probe.timestampMs, source: 'synthetic_stop', text };
 }

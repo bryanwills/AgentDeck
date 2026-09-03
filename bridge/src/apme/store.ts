@@ -339,6 +339,7 @@ CREATE TABLE IF NOT EXISTS vibe_feedback (
 CREATE INDEX IF NOT EXISTS idx_runs_model ON runs(model_id);
 CREATE INDEX IF NOT EXISTS idx_runs_agent ON runs(agent_type);
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at);
+CREATE INDEX IF NOT EXISTS idx_runs_session ON runs(session_id);
 CREATE INDEX IF NOT EXISTS idx_evals_run ON evals(run_id);
 CREATE INDEX IF NOT EXISTS idx_steps_run ON steps(run_id);
 
@@ -1016,6 +1017,19 @@ export class ApmeStore {
     if (sets.length === 0) return;
     vals.push(id);
     this.db.prepare(`UPDATE turns SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  /** The newest closed turn of any run that `sessionId` ever owned, provided
+   *  it closed at or after `endedSinceMs`. The collector's fallback for a
+   *  reply that arrives after the run's in-memory edges are gone. */
+  latestClosedTurnIdForSession(sessionId: string, endedSinceMs: number): string | null {
+    if (!this.db) return null;
+    const row = this.db.prepare(
+      `SELECT t.id AS id FROM turns t JOIN runs r ON r.id = t.run_id
+       WHERE r.session_id = ? AND t.ended_at IS NOT NULL AND t.ended_at >= ?
+       ORDER BY t.ended_at DESC LIMIT 1`,
+    ).get(sessionId, endedSinceMs) as { id: string } | undefined;
+    return row?.id ?? null;
   }
 
   getTurn(id: string): Record<string, unknown> | null {

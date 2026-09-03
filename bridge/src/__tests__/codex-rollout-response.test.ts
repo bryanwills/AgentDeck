@@ -169,6 +169,21 @@ describe('codex rollout response reader', () => {
       });
     });
 
+    it('carries the failure Codex wrote on the completion — such a turn fires no Stop', () => {
+      // Real shape (2026-09-03): six consecutive turns against a dead endpoint,
+      // each `task_complete` with `last_agent_message: null` and an `error`.
+      writeRollout([
+        { timestamp: '2026-09-03T14:57:37.116Z', type: 'response_item', payload: { type: 'message', role: 'user' } },
+        { timestamp: '2026-09-03T14:57:51.181Z', type: 'event_msg', payload: { type: 'task_complete', last_agent_message: null, error: { message: 'unexpected status 404 Not Found: Unknown error, url: https://chatgpt.com/backend-api/codex/responses', codex_error_info: 'other' } } },
+      ]);
+      expect(codexTurnCompletionSince(SID, Date.parse('2026-09-03T14:57:37.000Z'), root)).toEqual({
+        completedAt: Date.parse('2026-09-03T14:57:51.181Z'),
+        text: '',
+        error: 'unexpected status 404 Not Found: Unknown error, url: https://chatgpt.com/backend-api/codex/responses',
+        errorKind: 'other',
+      });
+    });
+
     it('never attributes an older turn\'s completion to this one', () => {
       writeRollout([
         { timestamp: '2026-08-29T20:10:43.358Z', type: 'event_msg', payload: { type: 'task_complete', last_agent_message: 'previous turn' } },

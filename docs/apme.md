@@ -619,6 +619,62 @@ no-op. Swift 데몬의 기존 `idleGapSec`(1800→900)도 같은 값으로 정�
 arm, min-turn-age 가드 포함 — arm 지점은 다르지만 상수는 한 사실). 게이트:
 `bridge/src/__tests__/apme-idle-gap-and-title.test.ts`.
 
+### 재시작 채택은 임시이고, 턴은 에이전트 자신의 기록으로 닫힌다 (2026-09-03)
+
+`rehydrateOpenRuns` 가 열린 run 을 다시 채택한 뒤 남은 구멍 넷을 라이브 창(재시작 2026-09-02
+23:40Z 포함 3일)에서 실측해 닫았다.
+
+- **채택은 세션이 말하기 전까지 임시다.** 채택된 run 은 `isLiveRun` 이 영원히 참이라 reaper 가
+  건너뛰었고, 데몬이 꺼진 사이 끝난 claude 세션의 열린 턴은 Stop 도 idle 타이머(턴 종료에만
+  arm)도 없이 아무도 닫지 않았다 — 두 run 이 재시작 후 17시간째 열려 있었다. 첫 훅이 오기
+  전까진 `rehydratedSessions` 에 남고 `isLiveRun` 은 거짓 → 2시간 reaper 가 가져가며
+  `releaseRun` 으로 메모리 엣지도 함께 버린다(닫힌 행에 후속 턴을 쓰지 않도록).
+- **에이전트 자신의 기록이 그 턴을 닫는다.** rehydrate 시 codex 는 rollout, claude 는 transcript
+  (`claudeTurnCompletionSince` — `~/.claude/projects/<cwd-slug>/<sid>.jsonl`, slug 추측 후 전체
+  스캔)를 읽어 `end_turn` 이면 그 기록의 시각에 응답과 함께 `synthetic_stop`, `stop_sequence`
+  면 `aborted`, 인터럽트 마커면 `interrupted` 로 닫는다. 꼬리가 `tool_use` 면 아무 주장도 하지
+  않는다(세션이 살아 있을 수 있다). `closeTurn(…, endedAt)` 은 데몬이 꺼져 있던 시간을 누구의
+  턴 길이에도 넣지 않는다.
+- **codex 의 next_prompt 는 대부분 유실이 아니었다.** 7일간 next_prompt 로 닫힌 codex 턴 23건을
+  rollout 으로 재조사: 16건은 완료 응답이 있었고(Stop 만 유실), 2건은 API 오류(`task_complete.
+  error` — Codex 는 이때 Stop 을 아예 안 쏜다), 5건만 흔적 없음. 다음 프롬프트가 열릴 때
+  `codexCompletionProbe` 로 같은 판정을 내려 응답·Codex 의 종료 시각과 함께 `synthetic_stop`
+  또는 `aborted` 로 닫고, 진짜 유실(5건)만 `next_prompt` 에 남긴다. stop-health 의 codex
+  손실률은 그만큼 내려간다(측정 전 15%).
+- **run 이 닫힌 뒤 도착한 응답도 그 턴에 붙는다.** 단일 턴 워커(`claude -p`) 는 Stop 뒤
+  80–130ms 에 SessionEnd 를 보내 run 을 닫고, 지연 transcript 재읽기(1.5s) 는 그 뒤에 도착해
+  `sessionToLastTurnId` 가 없어 버려졌다 — 하루 13건 중 6건. `setLastClosedTurnResponse` 가
+  store 의 `latestClosedTurnIdForSession`(60초 창, `idx_runs_session`) 으로 폴백한다. 30일
+  창의 단일 턴 무응답 57건 중 53건은 transcript 로 백필했다.
+- **judge 백로그가 멈추는 두 경로.** (1) 드레인이 30초마다 3건을 동시 투입했고 로컬 MLX 는
+  직렬이라 60초 호출 타임아웃을 넘긴 태스크마다 2회 실패 → 프로세스 수명 동안 보류, 로그엔
+  한 줄도 없었다(23–00시 283건 → 이후 0, 289건 pending). 이제 판정 중인 호출이 없을 때만
+  1건(`APME_TASK_JUDGE_DRAIN_PER_TICK`), 보류는 30분 후 만료(`TASK_EVAL_PARK_MS`), 보류
+  1·10·100번째마다 마지막 실패 사유를 `log` 로 남긴다. (2) 백엔드 프로브는 시작 시 한 번뿐이라
+  그 순간 남의 추론으로 바쁜 MLX 가 8초 안에 답하지 못하면 프로세스 수명 동안 드레인이 꺼졌다
+  — 실측된 상태였다. `unavailable` 이면 5분마다 재프로브(`APME_JUDGE_REPROBE_MS`)하고 복귀를
+  로그한다.
+
+게이트: `apme-rehydrate.test.ts`(임시 채택·transcript/rollout 닫기·releaseRun),
+`apme-collector.test.ts`(codex next-prompt 회수·늦은 응답 창), `apme-claude-turn-completion.test.ts`,
+`codex-rollout-response.test.ts`(실패 완료), `apme-task-boundary.test.ts`(보류 만료).
+
+**Swift 데몬 미러 결정.** Swift `ApmeRunner.enqueueTask` 는 `task_rollup` 을 그대로 judge 에
+보내며 gradeability 게이트·백로그 드레인·rehydrate 셋 다 없다. 셋은 성격이 다르다: `task-
+gradeability.ts` 는 turn 행에 대한 순수 규칙이므로 `generate-apme-display-rules` 계열로
+**생성**(`TaskGradeabilityRules.generated.swift` + 공유 벡터 파일)하고, 드레인 틱과 rehydrate
+는 데몬 상태 기계라 생성 대상이 아니며 Swift 에 손이식하되 `boundary_signal`/`end_source` 스탬프
+값을 공유 벡터로 고정한다. 순서는 gradeability 먼저 — App Store 데몬이 지금 침묵을 채점하고
+있는 건 그 게이트 부재 때문이다. 이 라운드에서는 결정만 했고 구현은 다음 차례다.
+
+**잔여 개선안 현황(2026-09-03).** P5(a)(b) subagent rollup·Graph 노드와 P6 evidence tier 는
+미착수 — 둘 다 `SubagentTimelineTracker` 의 census 를 sample 로 끌어오는 producer 가 선행
+조건이고, `SampleModelConfig.subagents` 는 선언만 있고 producer 가 0 이라(grep 기준) 같은
+producer 가 채워야 할 슬롯이다. `/apme/pareto`·`/apme/recommend` 는 대시보드 Recommend 탭이
+쓰지 않아 "죽은" 라우트로 보이지만 Daemon HTTP API 표에 문서화되고 `apme-http.test.ts` 가
+고정하는 외부 표면이므로 유지 — 대시보드가 scorecard 로 자체 계산하는 것과 라우트가 같은
+`pareto.ts` 를 공유하는지는 다음에 라우트를 만질 때 확인한다.
+
 ## Settings
 
 `~/.agentdeck/settings.json` 의 `apme` 블록:

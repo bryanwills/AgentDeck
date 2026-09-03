@@ -200,7 +200,65 @@ describe('collector rehydration after a restart', () => {
     expect(third.rehydrateOpenRuns().runs).toBe(2); // both read; one mapping survives
     expect(third.getRunId('s5')).toBe(newer);
     expect(third.isLiveRun(older)).toBe(false); // reapable
+    // Adoption is provisional: the newer run is owned in name only until its
+    // session sends a hook, so a session that ended while the daemon was down
+    // does not hold its run open forever.
+    expect(third.isLiveRun(newer)).toBe(false);
+    prompt(third, 's5', 'still here');
     expect(third.isLiveRun(newer)).toBe(true);
+  });
+
+  it('a claude turn open at startup that its transcript says ended is closed at the transcript time, with its reply', () => {
+    // Two worker sessions whose final end_turn landed 75 minutes before a
+    // restart were adopted with the turn open and stayed open 17 hours
+    // (2026-09-03): no Stop was coming, no idle timer arms on an open turn,
+    // and the reaper deferred to the adopting collector.
+    const first = makeCollector(store);
+    const runId = first.openRun({ sessionId: 'w-1', agentType: 'claude-code', projectName: 'demo', projectPath: '/tmp/demo' })!;
+    prompt(first, 'w-1', 'derive the shard');
+    const endedAt = Date.now() + 5_000;
+    const claudeProbe = vi.fn((_sid: string, _path: string | null, _since: number) => ({ endedAt, source: 'synthetic_stop' as const, text: '샤드 완료 보고다.' }));
+    const second = new ApmeCollector(store, undefined, undefined, IDLE_MS, () => null, claudeProbe);
+    const r = second.rehydrateOpenRuns();
+    expect(r.recovered).toBe(1);
+    expect(claudeProbe).toHaveBeenCalledWith('w-1', '/tmp/demo', expect.any(Number));
+    const turn = store.listTurns(runId)[0]!;
+    expect(turn.end_source).toBe('synthetic_stop');
+    expect(turn.ended_at).toBe(endedAt);
+    expect(turn.response).toBe('샤드 완료 보고다.');
+  });
+
+  it('a claude turn whose transcript tail is still mid-turn stays open', () => {
+    const first = makeCollector(store);
+    const runId = first.openRun({ sessionId: 'w-2', agentType: 'claude-code', projectName: 'demo' })!;
+    prompt(first, 'w-2', 'long task');
+    const second = new ApmeCollector(store, undefined, undefined, IDLE_MS, () => null, () => null);
+    expect(second.rehydrateOpenRuns().recovered).toBe(0);
+    expect(store.listTurns(runId)[0]!.ended_at).toBeNull();
+  });
+
+  it('a codex turn whose rollout records a failure closes as aborted, not as a recovered Stop', () => {
+    const first = makeCollector(store);
+    const runId = first.openRun({ sessionId: 'x-1', agentType: 'codex-cli', projectName: 'demo' })!;
+    prompt(first, 'x-1', 'glm 5.3 으로 업데이트');
+    const completedAt = Date.now() + 14_000;
+    const second = makeCollector(store, () => ({ completedAt, text: '', error: 'unexpected status 404 Not Found', errorKind: 'other' }));
+    expect(second.rehydrateOpenRuns().recovered).toBe(1);
+    const turn = store.listTurns(runId)[0]!;
+    expect(turn.end_source).toBe('aborted');
+    expect(turn.ended_at).toBe(completedAt);
+  });
+
+  it('releaseRun drops the adopted mapping so a later hook opens a fresh run', () => {
+    const first = makeCollector(store);
+    const older = first.openRun({ sessionId: 'r-1', agentType: 'claude-code', projectName: 'demo' })!;
+    prompt(first, 'r-1', 'work');
+    const second = makeCollector(store);
+    second.rehydrateOpenRuns();
+    expect(second.getRunId('r-1')).toBe(older);
+    second.releaseRun(older);
+    expect(second.getRunId('r-1')).toBeNull();
+    expect(second.isLiveRun(older)).toBe(false);
   });
 
   it('a run opened live before rehydrate is not displaced by a stale store row', () => {

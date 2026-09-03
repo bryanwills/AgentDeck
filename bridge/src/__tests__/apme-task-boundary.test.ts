@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { ApmeStore } from '../apme/store.js';
 import { ApmeCollector } from '../apme/collector.js';
-import { ApmeRunner } from '../apme/runner.js';
+import { ApmeRunner, TASK_EVAL_PARK_MS } from '../apme/runner.js';
 
 // Task-unit evaluation: tasks segment on EXPLICIT boundaries (`/task close` /
 // device button → 'manual', `/clear`) or session_end. TodoWrite all-completed
@@ -374,7 +374,10 @@ describe('ApmeRunner task eval', () => {
     const runId = collector.openRun({
       sessionId, agentType: 'claude-code', projectName: 'demo',
     });
-    collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'hi' });
+    // A real request, not a greeting: task-gradeability.ts declines a single
+    // tool-less exchange whose prompt is ≤12 chars and reply ≤200 as `trivial`,
+    // and a declined task never reaches the judge this test is about.
+    collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'add task boundary detection to the collector' });
     // Provide a response on the active turn so it's not all tool_only/empty.
     collector.setTurnResponse(sessionId, 'Sure — here is the plan.');
     // Explicit boundary closes the task and enqueues the rollup judge.
@@ -428,5 +431,40 @@ describe('ApmeRunner task eval', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(called).toBe(0);
+  });
+});
+
+describe('ApmeRunner task judge parking', () => {
+  let store!: ApmeStore;
+  beforeEach(async () => { store = await makeStore(); vi.useFakeTimers({ toFake: ['Date'] }); });
+  afterEach(() => { vi.useRealTimers(); cleanup(store); });
+
+  it('a task parked after two failures is offered again once the park expires', async () => {
+    // One busy hour at the judge used to park the whole backlog for the life
+    // of the process (2026-09-03: 289 tasks pending, drain at zero).
+    const collector = new ApmeCollector(store);
+    const runner = new ApmeRunner(store);
+    let calls = 0;
+    runner._setJudgeFn(async () => { calls++; throw new Error('MLX judge HTTP 503'); });
+    runner._setConfig({
+      enabled: true,
+      deterministic: { enabled: false, timeoutSec: 1, commands: {} },
+      judge: { backend: 'mlx', model: 'test', fallbackToMlx: false },
+    } as unknown as import('../apme/settings.js').ApmeConfig);
+    const sessionId = 'park-test';
+    const runId = collector.openRun({ sessionId, agentType: 'claude-code', projectName: 'demo' })!;
+    collector.ingestHook(sessionId, 'UserPromptSubmit', { prompt: 'add task boundary detection to the collector' });
+    collector.setTurnResponse(sessionId, 'Sure — here is the plan.');
+    collector.closeTaskExternal(sessionId, 'manual');
+    const taskId = store.listTasksForRun(runId)[0].id;
+
+    const settle = () => new Promise((r) => setTimeout(r, 5));
+    for (let i = 0; i < 4; i++) { runner.enqueueTask({ runId, taskId }); await settle(); }
+    expect(calls).toBe(2); // two attempts, then parked
+    expect(runner.inFlightTaskEvals).toBe(0);
+
+    vi.setSystemTime(Date.now() + TASK_EVAL_PARK_MS + 1);
+    runner.enqueueTask({ runId, taskId }); await settle();
+    expect(calls).toBe(3); // the park expired: a fresh attempt
   });
 });
