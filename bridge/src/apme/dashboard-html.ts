@@ -939,8 +939,8 @@ async function loadRecommend(){
 // :root once — every value is a design token, keeping the file hex-free
 // outside the :root mirror (design/verify-tokens-sync.py).
 const cssTok=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-const G_COLORS={run:cssTok('--ui-cyan'),task:cssTok('--ui-ok'),turn:cssTok('--ui-idle-dark'),session:cssTok('--amber-500'),project:cssTok('--kelp-300'),model:cssTok('--kelp-500'),agent:cssTok('--coral-500'),tool:cssTok('--ui-attn'),file:cssTok('--ink-300')};
-const G_EDGE={contains:'rgba(148,163,184,0.35)',continues:'rgba(97,102,224,0.75)',produced:'rgba(234,179,8,0.30)',used:'rgba(249,115,22,0.30)',touched:'rgba(148,163,184,0.25)'};
+const G_COLORS={run:cssTok('--ui-cyan'),task:cssTok('--ui-ok'),turn:cssTok('--ui-idle-dark'),session:cssTok('--amber-500'),project:cssTok('--kelp-300'),model:cssTok('--kelp-500'),agent:cssTok('--coral-500'),subagent:cssTok('--ui-cyan'),tool:cssTok('--ui-attn'),file:cssTok('--ink-300')};
+const G_EDGE={contains:'rgba(148,163,184,0.35)',continues:'rgba(97,102,224,0.75)',produced:'rgba(234,179,8,0.30)',delegated:'rgba(34,211,238,0.55)',used:'rgba(249,115,22,0.30)',touched:'rgba(148,163,184,0.25)'};
 
 async function loadGraph(){
   const stats=document.getElementById('g-stats');

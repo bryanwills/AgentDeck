@@ -168,6 +168,25 @@ enum ApmeHttpRoutes {
             ])
         }
 
+        // Read-only row-store graph — parity with bridge/src/apme/graph.ts.
+        // This route is what makes the bundled Graph tab available when the
+        // sandboxed Swift daemon, rather than the Node daemon, owns port 9120.
+        await httpServer.get("/apme/graph") { request in
+            if let denied = Self.requireToken(request) { return denied }
+            let q = request.queryParams
+            var options = ApmeGraphProjection.Options()
+            options.limit = min(max(Int(q["limit"] ?? "") ?? 60, 1), 400)
+            options.minHubDegree = min(max(Int(q["minHubDegree"] ?? "") ?? 2, 1), 50)
+            options.includeTurns = q["turns"] != "0"
+            options.includeFiles = q["files"] != "0"
+            options.agentType = q["agent"]
+            options.projectName = q["project"]
+            options.category = q["category"]
+            var body = ApmeGraphProjection.build(store: store, options: options)
+            body["schema"] = Self.schemaVersion
+            return .json(body)
+        }
+
         // Single task detail — mirrors Node bridge `GET /apme/tasks/:id`.
         // Returns the task row, its evals, and the turns belonging to it.
         await httpServer.get("/apme/tasks/*") { request in

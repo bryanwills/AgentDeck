@@ -13,13 +13,22 @@ const YELLOW = '\x1b[1;33m';
 const BLUE = '\x1b[0;34m';
 const NC = '\x1b[0m';
 
-function info(msg: string) { console.log(`${BLUE}[INFO]${NC} ${msg}`); }
-function ok(msg: string) { console.log(`${GREEN}[OK]${NC} ${msg}`); }
-function warn(msg: string) { console.log(`${YELLOW}[WARN]${NC} ${msg}`); }
-function fail(msg: string) { console.log(`${RED}[FAIL]${NC} ${msg}`); }
+function info(msg: string) {
+  console.log(`${BLUE}[INFO]${NC} ${msg}`);
+}
+function ok(msg: string) {
+  console.log(`${GREEN}[OK]${NC} ${msg}`);
+}
+function warn(msg: string) {
+  console.log(`${YELLOW}[WARN]${NC} ${msg}`);
+}
+function fail(msg: string) {
+  console.log(`${RED}[FAIL]${NC} ${msg}`);
+}
 
 const IS_WIN = process.platform === 'win32';
 const IS_LINUX = process.platform === 'linux';
+const SUPPORTED_NODE_MAJORS = [22, 24, 26] as const;
 
 // ─── Options ─────────────────────────────────────────────────────────
 
@@ -45,6 +54,10 @@ export function parseSetupArgs(argv: readonly string[]): SetupOptions {
     enterprise,
     autoInstallDaemon: enterprise || argv.includes('--yes') || argv.includes('-y'),
   };
+}
+
+export function isSupportedNodeMajor(major: number): boolean {
+  return (SUPPORTED_NODE_MAJORS as readonly number[]).includes(major);
 }
 
 function which(cmd: string): string | null {
@@ -73,12 +86,14 @@ function banner() {
 function checkPrerequisites(): boolean {
   let pass = true;
 
-  // Node.js >= 22
+  // Only maintained, prebuild-verified even Node lines. Node 20 reached EOL in
+  // April 2026; accepting every integer >=22 also accidentally promised the
+  // short-lived odd releases whose native-module prebuilds are removed first.
   const major = parseInt(process.version.replace('v', '').split('.')[0], 10);
-  if (major >= 22) {
+  if (isSupportedNodeMajor(major)) {
     ok(`Node.js ${process.version}`);
   } else {
-    fail(`Node.js ${process.version} — version 22+ required (Node 20 EOL April 2026)`);
+    fail(`Node.js ${process.version} — supported versions are 22, 24, and 26 (Node 20 reached EOL in April 2026)`);
     pass = false;
   }
 
@@ -104,7 +119,9 @@ function checkPrerequisites(): boolean {
       ok('Xcode Command Line Tools installed');
     } else {
       warn('Xcode Command Line Tools not installed — only needed if the prebuilt node-pty binary does not work.');
-      console.log(`     If the install below fails, run: ${YELLOW}xcode-select --install${NC} and re-run this command.`);
+      console.log(
+        `     If the install below fails, run: ${YELLOW}xcode-select --install${NC} and re-run this command.`,
+      );
     }
   }
 
@@ -142,7 +159,13 @@ function checkPrerequisites(): boolean {
       ? [
           join(process.env.PROGRAMFILES ?? 'C:\\Program Files', 'Elgato', 'StreamDeck', 'StreamDeck.exe'),
           join(process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)', 'Elgato', 'StreamDeck', 'StreamDeck.exe'),
-          join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'Programs', 'Elgato', 'StreamDeck', 'StreamDeck.exe'),
+          join(
+            process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'),
+            'Programs',
+            'Elgato',
+            'StreamDeck',
+            'StreamDeck.exe',
+          ),
         ]
       : ['/Applications/Elgato Stream Deck.app', '/Applications/Stream Deck.app'];
     // Stream Deck is ONE of several surfaces, not a requirement. The daemon runs
@@ -231,6 +254,61 @@ function installBridge() {
   }
 }
 
+/**
+ * Exercise the native database with the same `agentdeck` launcher that the
+ * daemon installer will use. `better-sqlite3` is optional at the npm layer so
+ * a failed install otherwise exits zero and leaves all APME data collection
+ * disabled. This remains a warning rather than making the whole daemon
+ * unavailable: session/device control has a deliberate no-APME fallback.
+ */
+function checkBridgeNativeRuntime() {
+  try {
+    const raw = execSync('agentdeck diag native --json', {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const report = JSON.parse(raw) as {
+      ok?: boolean;
+      runtime?: { node?: string; modulesAbi?: string; executable?: string };
+      betterSqlite3?: { status?: string; version?: string; error?: string; recovery?: string };
+    };
+    if (report.ok && report.betterSqlite3?.status === 'ready') {
+      ok(
+        `APME native database ready (better-sqlite3 ${report.betterSqlite3.version ?? 'unknown'}, Node ABI ${report.runtime?.modulesAbi ?? 'unknown'})`,
+      );
+      return;
+    }
+    warn('AgentDeck installed, but APME run/turn/task evaluation is unavailable.');
+    if (report.runtime?.executable)
+      console.log(
+        `     Runtime: ${report.runtime.node ?? 'unknown'} ABI ${report.runtime.modulesAbi ?? 'unknown'} — ${report.runtime.executable}`,
+      );
+    if (report.betterSqlite3?.error) console.log(`     Reason: ${report.betterSqlite3.error}`);
+    console.log(`     ${report.betterSqlite3?.recovery ?? 'Run `agentdeck diag native` for recovery details.'}`);
+  } catch (err) {
+    const stdout = (err as { stdout?: Buffer | string }).stdout?.toString().trim();
+    if (stdout) {
+      try {
+        const report = JSON.parse(stdout) as {
+          runtime?: { node?: string; modulesAbi?: string; executable?: string };
+          betterSqlite3?: { error?: string; recovery?: string };
+        };
+        warn('AgentDeck installed, but APME run/turn/task evaluation is unavailable.');
+        if (report.runtime?.executable)
+          console.log(
+            `     Runtime: ${report.runtime.node ?? 'unknown'} ABI ${report.runtime.modulesAbi ?? 'unknown'} — ${report.runtime.executable}`,
+          );
+        if (report.betterSqlite3?.error) console.log(`     Reason: ${report.betterSqlite3.error}`);
+        console.log(`     ${report.betterSqlite3?.recovery ?? 'Run `agentdeck diag native` for recovery details.'}`);
+        return;
+      } catch {
+        /* fall through to the command-level diagnostic */
+      }
+    }
+    warn('Could not verify the APME native database. Run `agentdeck diag native` before relying on evaluation data.');
+  }
+}
+
 // ─── 5. Install Hooks (inlined from @agentdeck/hooks) ────────────────
 
 const HOOK_EVENTS = [
@@ -270,25 +348,31 @@ function buildHookCommand(eventName: string): string {
   ];
   // PreToolUse long-poll (device approval) — see canonical commentary in hooks/src/install.ts.
   if (eventName === 'PreToolUse') {
-    return preamble.concat([
-      `RESP=$(curl -s -X POST "http://127.0.0.1:$PORT/hooks/PreToolUse" -H 'Content-Type: application/json' --max-time 60 -d @- 2>/dev/null)`,
-      `printf '%s' "\${RESP:-}"`,
-    ]).join('\n');
+    return preamble
+      .concat([
+        `RESP=$(curl -s -X POST "http://127.0.0.1:$PORT/hooks/PreToolUse" -H 'Content-Type: application/json' --max-time 60 -d @- 2>/dev/null)`,
+        `printf '%s' "\${RESP:-}"`,
+      ])
+      .join('\n');
   }
   // Stop is request-response too (turn-end directive queue) — short --max-time
   // since it runs on every turn end. See hooks/src/install.ts.
   if (eventName === 'Stop') {
-    return preamble.concat([
-      `RESP=$(curl -s -X POST "http://127.0.0.1:$PORT/hooks/Stop" -H 'Content-Type: application/json' --max-time 10 -d @- 2>/dev/null)`,
-      `printf '%s' "\${RESP:-}"`,
-    ]).join('\n');
+    return preamble
+      .concat([
+        `RESP=$(curl -s -X POST "http://127.0.0.1:$PORT/hooks/Stop" -H 'Content-Type: application/json' --max-time 10 -d @- 2>/dev/null)`,
+        `printf '%s' "\${RESP:-}"`,
+      ])
+      .join('\n');
   }
   // Fire-and-forget telemetry — bounded timeouts are mandatory so a restarting
   // daemon can't hold the socket past Claude's ~1.5s SessionEnd abort budget.
   // See hooks/src/install.ts.
-  return preamble.concat([
-    `curl -sf --connect-timeout 0.2 --max-time 0.8 -X POST "http://127.0.0.1:$PORT/hooks/${eventName}" -H 'Content-Type: application/json' -d @- >/dev/null 2>&1 || true`,
-  ]).join('\n');
+  return preamble
+    .concat([
+      `curl -sf --connect-timeout 0.2 --max-time 0.8 -X POST "http://127.0.0.1:$PORT/hooks/${eventName}" -H 'Content-Type: application/json' -d @- >/dev/null 2>&1 || true`,
+    ])
+    .join('\n');
 }
 
 /** Windows variant — kept in sync with `@agentdeck/hooks` `buildHookCommandWin`. */
@@ -347,10 +431,7 @@ function sweepLegacyHooks(claudeDir: string) {
       h.command?.includes('AGENTDECK_PORT') ||
       h.command?.includes('localhost:9120') ||
       (Array.isArray(h.hooks) &&
-        h.hooks.some(
-          (hh: any) =>
-            hh.command?.includes('AGENTDECK_PORT') || hh.command?.includes('localhost:9120'),
-        ));
+        h.hooks.some((hh: any) => hh.command?.includes('AGENTDECK_PORT') || hh.command?.includes('localhost:9120')));
 
     for (const event of HOOK_EVENTS) {
       if (!Array.isArray(settings.hooks[event])) continue;
@@ -409,10 +490,7 @@ function installHooks() {
       }
       if (
         Array.isArray(h.hooks) &&
-        h.hooks.some(
-          (hh: any) =>
-            hh.command?.includes('AGENTDECK_PORT') || hh.command?.includes('localhost:9120'),
-        )
+        h.hooks.some((hh: any) => hh.command?.includes('AGENTDECK_PORT') || hh.command?.includes('localhost:9120'))
       ) {
         return false;
       }
@@ -490,11 +568,11 @@ function seedCompatibility() {
       .match(/^([\d.]+)/)?.[1];
     let bridgeVer: string | null = null;
     try {
-      const list = JSON.parse(
-        execSync('npm list -g @agentdeck/bridge --json 2>/dev/null', { encoding: 'utf-8' }),
-      );
+      const list = JSON.parse(execSync('npm list -g @agentdeck/bridge --json 2>/dev/null', { encoding: 'utf-8' }));
       bridgeVer = list?.dependencies?.['@agentdeck/bridge']?.version ?? null;
-    } catch { /* not installed globally yet */ }
+    } catch {
+      /* not installed globally yet */
+    }
     if (claudeVer) {
       writeFileSync(
         compatPath,
@@ -510,7 +588,9 @@ function seedCompatibility() {
       );
       ok('Compatibility state initialized');
     }
-  } catch { /* non-critical */ }
+  } catch {
+    /* non-critical */
+  }
 }
 
 // ─── 7. Optional dependencies ────────────────────────────────────────
@@ -597,14 +677,14 @@ function success(opts: SetupOptions, daemonInstalled: boolean) {
     console.log('  1. Restart Stream Deck app');
     console.log('  2. Add AgentDeck actions to your Stream Deck profile');
     console.log("  3. Run 'agentdeck daemon install' to start monitoring and auto-start on login");
-    console.log("     (macOS LaunchAgent / Windows Scheduled Task)");
+    console.log('     (macOS LaunchAgent / Windows Scheduled Task)');
     console.log("  4. Run 'claude', 'codex', or 'opencode' normally — hooks/events discover sessions");
   }
   console.log('');
   console.log('  Usage:');
   console.log('    agentdeck daemon install   Start monitoring on login');
   console.log('    agentdeck dashboard        Open the terminal dashboard');
-  console.log("    claude / codex / opencode  Run agents normally; hooks/events discover them");
+  console.log('    claude / codex / opencode  Run agents normally; hooks/events discover them');
   console.log('    agentdeck status   Check status');
   console.log('    agentdeck stop     Stop bridge');
   console.log('');
@@ -622,6 +702,7 @@ async function main() {
 
   console.log('');
   installBridge();
+  checkBridgeNativeRuntime();
   console.log('');
   installHooks();
   installKiroHooks();

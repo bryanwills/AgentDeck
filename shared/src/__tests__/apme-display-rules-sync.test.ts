@@ -1,5 +1,5 @@
 // Drift gate for the generated APME work-display mirrors
-// (shared/src/task-title.ts + shared/src/action-fold.ts → Swift). A hand edit
+// (task title + action fold + task gradeability → Swift). A hand edit
 // to either generated file, or a skipped `pnpm generate-apme-display-rules`,
 // fails here in CI — the pairing-code-rules sync-test pattern. This replaces
 // the former task-title-swift-sync.test.ts constants grep: the title/fold
@@ -17,10 +17,11 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as taskTitle from '../task-title.js';
 import * as actionFold from '../action-fold.js';
+import * as taskGradeability from '../../../bridge/src/apme/task-gradeability.js';
 import { OUTPUTS, rulesFrom } from '../../../scripts/generate-apme-display-rules.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
-const rules = rulesFrom(taskTitle, actionFold);
+const rules = rulesFrom(taskTitle, actionFold, taskGradeability);
 
 describe('generated APME display-rule mirrors in sync', () => {
   for (const [rel, emit] of OUTPUTS) {
@@ -31,7 +32,7 @@ describe('generated APME display-rule mirrors in sync', () => {
   }
 
   it('emitters embed the SSOT constants (sanity on the emitters themselves)', () => {
-    const [titleOut, foldOut] = OUTPUTS;
+    const [titleOut, foldOut, gradeabilityOut] = OUTPUTS;
     const swiftTitle = titleOut[1](rules);
     const swiftFold = foldOut[1](rules);
     expect(swiftTitle).toContain(`static let maxChars = ${taskTitle.TASK_TITLE_MAX_CHARS}`);
@@ -43,13 +44,24 @@ describe('generated APME display-rule mirrors in sync', () => {
     for (const name of actionFold.MESSAGING_TOOL_NAMES) {
       expect(swiftFold).toContain(JSON.stringify(name));
     }
+    const swiftGradeability = gradeabilityOut[1](rules);
+    expect(swiftGradeability).toContain(
+      `static let workEvidenceMinToolCalls = ${taskGradeability.WORK_EVIDENCE_MIN_TOOL_CALLS}`,
+    );
+    expect(swiftGradeability).toContain(
+      `static let trivialPromptMaxChars = ${taskGradeability.TRIVIAL_PROMPT_MAX_CHARS}`,
+    );
+    expect(swiftGradeability).toContain(
+      `static let trivialReplyMaxChars = ${taskGradeability.TRIVIAL_REPLY_MAX_CHARS}`,
+    );
   });
 
-  it('the Swift suite replays both shared vector files (grep the test wiring)', () => {
+  it('the Swift suite replays all shared vector files (grep the test wiring)', () => {
     const swiftTest = readFileSync(
       `${repoRoot}apple/AgentDeckTests/ApmeTaskBoundaryTests.swift`, 'utf8');
     expect(swiftTest).toContain('shared/task-title-vectors.json');
     expect(swiftTest).toContain('shared/action-fold-vectors.json');
+    expect(swiftTest).toContain('shared/task-gradeability-vectors.json');
   });
 });
 

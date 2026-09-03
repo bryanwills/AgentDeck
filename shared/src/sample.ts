@@ -55,6 +55,7 @@ export type TrajectoryEventKind =
   | 'assistant_message'
   | 'model'
   | 'tool'
+  | 'subagent'
   | 'state'
   | 'info';
 
@@ -100,6 +101,20 @@ export interface ToolEvent extends TrajectoryEventBase {
   status?: ToolStatus;
 }
 
+/** One child-agent lifecycle event attributed to the parent task. The child
+ *  remains observation-only; this is evidence for rollup/graph projections,
+ *  not a separately steerable session. */
+export interface SubagentEvent extends TrajectoryEventBase {
+  kind: 'subagent';
+  /** Provider child id, scoped by the parent session by consumers. */
+  id: string;
+  /** Human-readable type/handle, e.g. `reviewer#ent2`. */
+  name: string;
+  phase: 'started' | 'completed';
+  summary?: string | null;
+  durationMs?: number | null;
+}
+
 /** An agent-state machine transition (idle → processing → awaiting …). */
 export interface StateTransitionEvent extends TrajectoryEventBase {
   kind: 'state';
@@ -119,6 +134,7 @@ export type TrajectoryEvent =
   | AssistantMessageEvent
   | ModelEvent
   | ToolEvent
+  | SubagentEvent
   | StateTransitionEvent
   | InfoEvent;
 

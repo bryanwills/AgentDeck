@@ -6,6 +6,11 @@ packages:
   - hooks
   - setup
 
+# Fail development installs on EOL or short-lived odd Node releases. Native
+# prebuild coverage is a product contract, not an advisory: CI verifies every
+# supported even line below.
+engineStrict: true
+
 allowBuilds:
   better-sqlite3: true
   node-pty: true

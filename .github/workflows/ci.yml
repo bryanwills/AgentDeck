@@ -62,3 +62,39 @@ jobs:
             git diff generated/protocol/ shared/src/command-builders.ts
             exit 1
           fi
+
+  windows-native-runtime:
+    name: Windows native runtime (Node ${{ matrix.node }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24, 26]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      # better-sqlite3 is intentionally optional at the npm layer so the
+      # daemon can retain its no-APME fallback. Its install failure therefore
+      # exits zero; the diagnostic smoke test below is the actual prebuild
+      # availability gate for every runtime AgentDeck claims to support.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build bridge diagnostic
+        run: |
+          pnpm --filter @agentdeck/shared build
+          pnpm --filter @agentdeck/hooks build
+          pnpm --filter @agentdeck/bridge build
+
+      - name: Open SQLite through the daemon runtime
+        run: node bridge/dist/cli.js diag native --json

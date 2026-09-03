@@ -2,6 +2,68 @@
 
 ---
 
+## 2026-09-04 — #281: native dependency success is measured under the daemon's Node, and Node 20 stays unsupported
+
+Windows에서 `better-sqlite3` 설치가 선택 의존성 실패로 종료코드 0을 남긴 뒤 APME 전체가
+꺼진 #281을 패키지·서비스 런타임 관점에서 다시 판정했다. upstream 12.10이 제거한 것은
+Node 20(ABI 115)/23 prebuild이고, 이슈의 실제 데몬 Node 22(ABI 127) prebuild는 존재했다.
+따라서 원인은 "데몬 런타임용 바이너리가 없음"이 아니라 **의존성을 설치한 Node와 Windows
+Scheduled Task가 고정한 `process.execPath`가 달랐고, optional dependency 실패 뒤 그 동일성을
+검증하는 단계가 없었던 것**이다. Node를 바꾼 뒤 task를 재등록하지 않는 일반 설치도 같은
+모양을 만들 수 있다.
+
+Node 20 지원은 복원하지 않는다. 2026-04 EOL이라 보안 패치가 끝났고, prebuild가 없는
+Windows 사용자에게 Visual Studio Build Tools/source build까지 제품 지원하는 비용을 만든다.
+느슨한 `>=22`도 odd release까지 약속하므로 계약을 **22/24/26**으로 좁혔다. 다섯 package
+manifest와 setup/source installer가 같은 목록을 쓰고, workspace는 `engineStrict`로 어긋난
+개발 설치를 거부한다. `better-sqlite3`는 검증한 12.11.1에 exact-pin해 새 설치가 semver 범위로
+prebuild matrix를 바꾸지 못하게 했다.
+
+신규 `agentdeck diag native [--json]`는 현재 `process.execPath`/Node/ABI/platform을 출력하고
+같은 프로세스에서 `better-sqlite3(':memory:')` + 실제 쿼리를 실행한다. setup은 bridge 설치
+직후 이를 호출하고, `daemon install`도 Scheduled Task 등록 전 같은 검사를 한다. 실패해도
+세션·기기 제어 fallback은 유지하되 큰 경고와 단일 복구 경로
+(`npx @agentdeck/setup --yes`)를 남긴다. 초기화 원문은 더 이상 버리지 않고
+`/health.apme.error`와 `daemon status`까지 전달한다. CI는 Windows Node 22/24/26 matrix에서
+optional install의 종료코드를 믿지 않고 이 smoke test 자체를 gate로 쓴다.
+
+검증: Node 26.5.0/ABI 147에서 `better-sqlite3` 12.11.1 in-memory query 성공,
+신규/관련 17 tests, 전체 Vitest **252 files / 3,867 tests**, 전체 TypeScript typecheck,
+monorepo build, version/docs/design-system gates 통과. Windows 세 ABI는 PR CI가 실측한다.
+
+---
+
+## 2026-09-04 — Swift gradeability 생성 미러와 subagent census→sample→rollup/Graph 완결
+
+전날 남긴 TODO를 코드·실물 DB·양 데몬 경로로 다시 점검했다. Swift task judge는 실제로
+사용자 prompt까지 "작업 텍스트"로 세던 옛 any-text 게이트를 유지하고 있었고, subagent hook은
+Node `SubagentTimelineTracker`/Swift `handleSubagentTimelineHook`에서 일반 APME보다 먼저 반환되어
+`SampleModelConfig.subagents` writer가 생길 수 없는 구조였다. Swift가 번들한 대시보드는 Graph
+탭을 노출하지만 `/apme/graph` route도 없었다.
+
+- `task-gradeability.ts`에서 `TaskGradeabilityRules.generated.swift`를 생성하도록 기존 generator를
+  확장하고 `shared/task-gradeability-vectors.json`을 Node/Swift가 함께 리플레이한다. Swift
+  `ApmeRunner`가 judge enqueue 전 동일한 `no_reply`/`aborted_only`/`trivial` 게이트와
+  `notes_json.notGradeable` 스탬프를 적용한다.
+- 양 census가 start/completion의 id·표시명·duration·summary만 활성 부모 task로 handoff한다.
+  `sample_events.kind='subagent'`와 `model_config.subagents`를 함께 쓰고, 뒤의 모델/usage 갱신은
+  JSON header를 병합한다. 부모 task가 없으면 최근 세션을 추측하지 않는다.
+- 양 task-rollup prompt가 typed trajectory를 읽고, Node/Swift `/apme/graph`가 한 child node와
+  `delegated` edge를 만든다. Swift에는 App Store-safe read-only `ApmeGraphProjection`과 route를
+  추가했다. 대시보드 색/edge와 생성 HTML도 동기화했다.
+
+라이브: checkout daemon build `cbf78061aa2e` 재시작에서 13 open run을 재수화하고 agent record로
+3 turn을 즉시 닫았다. MLX는 다시 ready(모델 endpoint 30ms, probe 1.165s)라 22시 UTC에 6 task를
+판정했고 30일 pending은 301→250, 전체 judged는 808(30일 595)이 됐다. commit `5ad609cf` 뒤
+codex closed 표본은 stop 4/4 응답 보유; 새 next_prompt 표본과 재시작 후 2시간 reaper 표본은
+아직 없어 그 두 분기는 회귀 테스트 판정만 유지한다. 반면 P5는 실제 다른 Claude 세션의 child
+completion이 sample/model_config에 기록되고 live `/apme/graph` node+edge로 노출되는 것까지 확인.
+
+게이트: bridge/shared tsc, vitest 252 files / 3,867 tests, generator `--check`, docs check,
+macOS `ApmeTaskBoundaryTests` 62/62. Xcode 절차는 `.agents/workflows/apple-xcode-debug.md`를 따랐다.
+
+---
+
 ## 2026-09-03 — 재시작 이후 라이브 검증: 채택된 run 은 임시여야 했고, 턴을 닫는 건 에이전트의 기록이었다
 
 앞 라운드의 네 수정(rehydrate·codex 응답 소스·turn model·gradeability·백로그 드레인)을

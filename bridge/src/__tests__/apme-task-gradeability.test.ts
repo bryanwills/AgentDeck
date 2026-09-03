@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import { ApmeStore } from '../apme/store.js';
 import { ApmeCollector } from '../apme/collector.js';
 import { ApmeRunner } from '../apme/runner.js';
@@ -96,6 +97,45 @@ describe('taskGradeability', () => {
     expect(readNotGradeable(JSON.stringify({ reasoning: 'x', done: [], missed: [] }))).toBeNull();
     expect(readNotGradeable(null)).toBeNull();
     expect(readNotGradeable('not json')).toBeNull();
+  });
+});
+
+describe('shared vector file parity (shared/task-gradeability-vectors.json)', () => {
+  interface VectorTurn {
+    prompt?: string;
+    response?: string | null;
+    toolCalls?: number;
+    filesModified?: number;
+    filesCreated?: number;
+    endSource?: string;
+    efficiencyJson?: string;
+  }
+  interface Vector {
+    turns: VectorTurn[];
+    expected: 'no_reply' | 'aborted_only' | 'trivial' | null;
+    note: string;
+  }
+  const here = dirname(fileURLToPath(import.meta.url));
+  const vectors = JSON.parse(readFileSync(
+    join(here, '..', '..', '..', 'shared', 'task-gradeability-vectors.json'), 'utf8',
+  )) as Vector[];
+
+  it('has enough vectors to be a gate', () => {
+    expect(vectors.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it.each(vectors.map((v) => [v.note, v] as const))('%s', (_note, v) => {
+    const turns = v.turns.map((t) => ({
+      prompt: t.prompt,
+      response: t.response,
+      tool_calls: t.toolCalls,
+      files_modified: t.filesModified,
+      files_created: t.filesCreated,
+      end_source: t.endSource,
+      efficiency_json: t.efficiencyJson,
+    }));
+    const result = taskGradeability(turns);
+    expect(result.gradeable ? null : result.reason).toBe(v.expected);
   });
 });
 

@@ -18,7 +18,8 @@
  *     session held 127 runs). Now `runs.parent_run_id`.
  *
  * What is still denormalized, and is therefore DERIVED here rather than read:
- * session, project, model, agent, tool and file are string columns, not rows.
+ * session, project, model, agent, tool, subagent and file are string/payload
+ * identities, not rows.
  * They are exactly the interesting hubs — they connect work units that share no
  * ancestor — so this projection materializes them as nodes. That is a deliberate
  * choice: they are cheap to derive, they change meaning as the schema evolves,
@@ -45,6 +46,7 @@ export type ApmeGraphNodeKind =
   | 'model'
   | 'agent'
   | 'tool'
+  | 'subagent'
   | 'file';
 
 export type ApmeGraphEdgeKind =
@@ -56,6 +58,8 @@ export type ApmeGraphEdgeKind =
   | 'produced'
   /** turn→tool, task→tool — the turn invoked this tool. */
   | 'used'
+  /** task/turn→subagent — the parent delegated part of this work. */
+  | 'delegated'
   /** turn→file, task→file — the turn read or wrote this path. */
   | 'touched';
 
@@ -112,5 +116,6 @@ export const apmeGraphNodeId = {
   model: (id: string) => `model:${id}`,
   agent: (t: string) => `agent:${t}`,
   tool: (name: string) => `tool:${name}`,
+  subagent: (id: string) => `subagent:${id}`,
   file: (path: string) => `file:${path}`,
 } as const;

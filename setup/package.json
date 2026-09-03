@@ -2,7 +2,7 @@
   "name": "@agentdeck/setup",
   "version": "1.2.0",
   "engines": {
-    "node": ">=22"
+    "node": "22.x || 24.x || 26.x"
   },
   "description": "One-command installer for AgentDeck — put AI coding agents (Claude Code, Codex, OpenCode) on physical control surfaces",
   "type": "module",

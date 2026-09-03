@@ -4,7 +4,7 @@
  *
  * Derived on demand, never persisted: the containment spine comes straight from
  * foreign keys, while session / project / model / agent / tool / file hubs are
- * materialized from denormalized columns and tool payloads. Those hubs are the
+ * materialized from denormalized columns and trajectory payloads. Those hubs are the
  * reason this exists — they are the only edges that connect work units sharing
  * no ancestor.
  */
@@ -84,6 +84,7 @@ class GraphBuilder {
       // a hub referenced from many rows keeps one stable identity.
       if (existing.ts == null && n.ts != null) existing.ts = n.ts;
       if (existing.score == null && n.score != null) existing.score = n.score;
+      if (n.meta) existing.meta = { ...(existing.meta ?? {}), ...n.meta };
       return n.id;
     }
     this.nodes.set(n.id, n);
@@ -139,6 +140,14 @@ function num(v: unknown): number | null {
 
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.length > 0 ? v : null;
+}
+
+function payloadObject(payload: string | null | undefined): Record<string, unknown> {
+  if (!payload) return {};
+  try {
+    const parsed = JSON.parse(payload) as unknown;
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+  } catch { return {}; }
 }
 
 /** Build a graph slice anchored on the most recent task units. */
@@ -200,7 +209,43 @@ export function buildApmeGraph(store: ApmeStore, opts: ApmeGraphOptions = {}): A
 
     // ── Trajectory: tools and files ──
     const events = store.listSampleEventRows(t.id);
+    const delegated = new Set<string>();
     for (const ev of events) {
+      if (ev.kind === 'subagent') {
+        const p = payloadObject(ev.payload);
+        const childId = str(p.id);
+        const name = str(p.name);
+        if (!childId || !name) continue;
+        let anchor = taskNode;
+        const turnId = str(ev.turnId);
+        if (includeTurns && turnId) {
+          anchor = g.node({
+            id: nid.turn(turnId), kind: 'turn',
+            label: `turn ${ev.turnIndex ?? '?'}`,
+            ts: ev.ts,
+            meta: { index: num(ev.turnIndex) },
+          });
+          g.edge(taskNode, anchor, 'contains');
+        }
+        const childKey = `${t.sessionId}:${childId}`;
+        const childNode = g.node({
+          id: nid.subagent(childKey), kind: 'subagent', label: name, ts: ev.ts,
+          meta: {
+            phase: p.phase === 'completed' ? 'completed' : 'started',
+            durationMs: num(p.durationMs),
+            summary: str(p.summary),
+          },
+        });
+        // Start + completion are two observations of ONE delegation edge, not
+        // a weighted edge of two. A completion without a captured start still
+        // gets the edge rather than disappearing.
+        const edgeKey = `${anchor}|${childNode}`;
+        if (!delegated.has(edgeKey)) {
+          delegated.add(edgeKey);
+          g.edge(anchor, childNode, 'delegated');
+        }
+        continue;
+      }
       if (ev.kind !== 'tool') continue;
       toolEvents++;
       const toolName = str(ev.toolName);

@@ -62,6 +62,14 @@ export interface InitApmeOptions {
 }
 
 let singleton: ApmeModule | null = null;
+let lastInitFailure: string | null = null;
+
+/** Last boot failure retained for `/health` and CLI diagnostics. The ApmeStore
+ * instance that owns the detailed native-load error otherwise becomes
+ * unreachable when initApme returns null. */
+export function getApmeInitFailure(): string | null {
+  return lastInitFailure;
+}
 
 /** Initialize the APME subsystem. Returns null if the SQLite store can't open.
  *  When null, the failure reason is logged at ERROR level — silent disable was
@@ -74,9 +82,14 @@ export async function initApme(
   const store = new ApmeStore(dbPath);
   const ok = await store.init();
   if (!ok) {
-    logError(`APME disabled — ${store.lastInitError ?? 'unknown init failure'}. Agent runs will not be measured.`);
+    const runtime = `${process.version} ABI ${process.versions.modules} at ${process.execPath}`;
+    lastInitFailure =
+      `${store.lastInitError ?? 'unknown init failure'}; runtime ${runtime}. ` +
+      'Run `agentdeck diag native`, then re-run `npx @agentdeck/setup --yes` with Node 22, 24, or 26.';
+    logError(`APME disabled — ${lastInitFailure} Agent runs will not be measured.`);
     return null;
   }
+  lastInitFailure = null;
   const hwSampler = new ApmeHwSampler();
   const collector = new ApmeCollector(store, hwSampler);
   const runner = new ApmeRunner(store);

@@ -110,6 +110,7 @@
 		313772161048869FB5896E3A /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5D17A24E0C5B16A097D62E9 /* AuthManager.swift */; };
 		3173BC2B844664891B8F3934 /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B7A8A00EB9D3B9345E36EB4 /* ProtocolTests.swift */; };
 		32577E0D7F449489455D0C9D /* HTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FF390BEA92326B1152B55A9 /* HTTPServer.swift */; };
+		32F4DC41FD43837549F3145B /* ApmeGraphProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A18E2C549E4BD4B7BB55436A /* ApmeGraphProjection.swift */; };
 		34444319598506828DE09006 /* SessionRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF788F02F06C01E401DC8EA6 /* SessionRegistry.swift */; };
 		36177FF16DB44FF20C64B33D /* OpenClawApprovalRules.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AF67EB1D0BDEE57B39E6E9F /* OpenClawApprovalRules.generated.swift */; };
 		36A5E1C9F248EF1B2B36A6D5 /* CodexConfigInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A70C6FAC4BDE4DAAFA08E74 /* CodexConfigInstaller.swift */; };
@@ -413,6 +414,7 @@
 		CB4DB4586BC5196412C3429C /* UsageAPIClientThreadingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9841FBF8AFC5D5C65809F8B /* UsageAPIClientThreadingTests.swift */; };
 		CB77E3E1CAFEB083339F155C /* MenuBarDensityPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0DF2FF90EE46351B4FC2F59 /* MenuBarDensityPolicyTests.swift */; };
 		CBB9FC921D8EFD210A80BC6D /* DisplayMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1F43DCAC6100C73B98139EA /* DisplayMonitor.swift */; };
+		CC90582E2EF8BCBAC71025CA /* ApmeGraphProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A18E2C549E4BD4B7BB55436A /* ApmeGraphProjection.swift */; };
 		CCB2A2848DDAADBEB6F7BB53 /* OctopusCreature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 776467350B975D0CA1A18E84 /* OctopusCreature.swift */; };
 		CD0FEA280FA39493518D285A /* LocalPeerOwnership.swift in Sources */ = {isa = PBXBuildFile; fileRef = 685766B4F565619F7EC7DB28 /* LocalPeerOwnership.swift */; };
 		CD8B866925EF6BC839EC467D /* HttpAccessPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D805A12FAC706136018710BC /* HttpAccessPolicyTests.swift */; };
@@ -490,6 +492,7 @@
 		ED941D3D0148227D99EDDB0A /* PixooSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47FFD673C1AD8EAF690B9E82 /* PixooSheet.swift */; };
 		EDB44E89F700BC28A7AB9A83 /* CodexConfigInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A70C6FAC4BDE4DAAFA08E74 /* CodexConfigInstaller.swift */; };
 		EE91D7CCEFEA94B80A2A4FCD /* SetupNeededCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAC179B8F91EF42F5EBDE911 /* SetupNeededCard.swift */; };
+		F04C9951C6E7B99B371B7A9D /* TaskGradeabilityRules.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2A5E894C58B03EE5C8EF791 /* TaskGradeabilityRules.generated.swift */; };
 		F0C03AF0FCFD56AC72DE9FD3 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 908DB05568DE4E828CD7FCE6 /* Logger.swift */; };
 		F1AA123E5D16742D2C7B003C /* apme-dashboard.html in Resources */ = {isa = PBXBuildFile; fileRef = 766909A21820E709DA63C7C2 /* apme-dashboard.html */; };
 		F1C357A840E59D7A188C808B /* OnboardingScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9965CED8937C8C1F27DFCC68 /* OnboardingScreen.swift */; };
@@ -522,6 +525,7 @@
 		FDCD49FC590D9C5D0E1A70CD /* BridgeLogStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F9ACDDF739DF572C9280B38 /* BridgeLogStream.swift */; };
 		FDE24F470C55939E9503C810 /* IDotMatrixProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 640AC95BED93D142107D828E /* IDotMatrixProtocolTests.swift */; };
 		FEA477EB09C6A7DE0EA46F22 /* AttentionTheaterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1853443C348441BF748662A /* AttentionTheaterView.swift */; };
+		FFEFE3D0FCA06EE1E7760F3D /* TaskGradeabilityRules.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2A5E894C58B03EE5C8EF791 /* TaskGradeabilityRules.generated.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -715,6 +719,7 @@
 		9E6E252A5DCAC5E298C21473 /* SessionBrand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionBrand.swift; sourceTree = "<group>"; };
 		9F9B51FC480E3419A6334A20 /* SandDisturbance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SandDisturbance.swift; sourceTree = "<group>"; };
 		A0B6AFDC194533BFA388DECA /* AppReviewPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppReviewPrompt.swift; sourceTree = "<group>"; };
+		A18E2C549E4BD4B7BB55436A /* ApmeGraphProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApmeGraphProjection.swift; sourceTree = "<group>"; };
 		A3F214BD333DDE19525E3836 /* CodexOriginatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexOriginatorTests.swift; sourceTree = "<group>"; };
 		A472C32952DF18A4C77A969A /* UnknownAgentForwardCompatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnknownAgentForwardCompatTests.swift; sourceTree = "<group>"; };
 		A4EB2E51F6EFD29341EB6127 /* StateColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateColors.swift; sourceTree = "<group>"; };
@@ -794,6 +799,7 @@
 		EF126528728AEF6E07C3C7ED /* KiroCreature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KiroCreature.swift; sourceTree = "<group>"; };
 		F028824993D611B356EA86D3 /* SessionFormatters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionFormatters.swift; sourceTree = "<group>"; };
 		F15F55435772A15B8F0E92C1 /* AgentState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentState.swift; sourceTree = "<group>"; };
+		F2A5E894C58B03EE5C8EF791 /* TaskGradeabilityRules.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskGradeabilityRules.generated.swift; sourceTree = "<group>"; };
 		F2E6BEE1A730418C1EBDC048 /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 		F358D3115EEB262D59BD6439 /* ToastOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastOverlay.swift; sourceTree = "<group>"; };
 		F4FF80663C090E22A9DA63E8 /* LICENSE-CC-BY-SA-4.0.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "LICENSE-CC-BY-SA-4.0.txt"; sourceTree = "<group>"; };
@@ -1115,6 +1121,7 @@
 				2AD17B846036A2F78B153024 /* ApmeActivityHistory.swift */,
 				5857149AEB13F8BEC5CDE41B /* ApmeClassifier.swift */,
 				8EF540FF89BA54744CF94CC4 /* ApmeCollector.swift */,
+				A18E2C549E4BD4B7BB55436A /* ApmeGraphProjection.swift */,
 				4A2D26F6BDF08F6E4F2F8439 /* ApmeHttpRoutes.swift */,
 				46988130529D53105344C47F /* ApmeJudgeApi.swift */,
 				EB1470AE66304DC838676016 /* ApmeJudgeDetect.swift */,
@@ -1129,6 +1136,7 @@
 				CBBE1258602AB5ABC83560EE /* ApmeSettings.swift */,
 				F8E176199605E14D2EAF35A1 /* ApmeStore.swift */,
 				F8A8384A78E6B40497C01168 /* ReviewRunner.swift */,
+				F2A5E894C58B03EE5C8EF791 /* TaskGradeabilityRules.generated.swift */,
 				ECF625C2B3057379F5CFA1B0 /* TaskTitleRules.generated.swift */,
 			);
 			path = Apme;
@@ -1700,6 +1708,7 @@
 				015E006D6E9D932E1DDEED68 /* ApmeClassifier.swift in Sources */,
 				830C151322C62CF4B3ADA406 /* ApmeCollector.swift in Sources */,
 				2B8F7E0477776522FD3417A9 /* ApmeDashboardWindow.swift in Sources */,
+				32F4DC41FD43837549F3145B /* ApmeGraphProjection.swift in Sources */,
 				57A43302B1180444CF962588 /* ApmeHttpRoutes.swift in Sources */,
 				7445B7D3F13CDCC4D291B5EA /* ApmeJudgeApi.swift in Sources */,
 				26BE89DCBC5EFE296F55CE13 /* ApmeJudgeDetect.swift in Sources */,
@@ -1851,6 +1860,7 @@
 				50D04081E2C11AAD2D67C254 /* SwiftSurfaceFirmwareStore.swift in Sources */,
 				98B8B1F86B399218B89247D8 /* TUITerrariumRenderer.swift in Sources */,
 				F940158912CF7ACA80C3376C /* TailDecoder.swift in Sources */,
+				F04C9951C6E7B99B371B7A9D /* TaskGradeabilityRules.generated.swift in Sources */,
 				B7AC1325F3226677AF160B50 /* TaskTitleRules.generated.swift in Sources */,
 				F20373DB53552C2F36204EDF /* TerrariumConfig.swift in Sources */,
 				20BC342C63610F58CFF51A74 /* TerrariumRenderer.swift in Sources */,
@@ -1900,6 +1910,7 @@
 				C811739586EAB613B7881490 /* ApmeClassifier.swift in Sources */,
 				FBB919EF89AE0DBEE2DC0082 /* ApmeCollector.swift in Sources */,
 				0702C9FEAA7C1E2A2E6CAA36 /* ApmeDashboardWindow.swift in Sources */,
+				CC90582E2EF8BCBAC71025CA /* ApmeGraphProjection.swift in Sources */,
 				2FA1EFC88159FD511847AFEA /* ApmeHttpRoutes.swift in Sources */,
 				99CC463E11558649E28B5539 /* ApmeJudgeApi.swift in Sources */,
 				BDCB2D139D067100AE0880B5 /* ApmeJudgeDetect.swift in Sources */,
@@ -2052,6 +2063,7 @@
 				D285BA530EBC08FD2C5CCF32 /* SwiftSurfaceFirmwareStore.swift in Sources */,
 				7F401B71F68C95DEBD74DAFE /* TUITerrariumRenderer.swift in Sources */,
 				BCBA361B299FFE8F5C9CE65E /* TailDecoder.swift in Sources */,
+				FFEFE3D0FCA06EE1E7760F3D /* TaskGradeabilityRules.generated.swift in Sources */,
 				82E9E69FDCEB956332E0D117 /* TaskTitleRules.generated.swift in Sources */,
 				076E08E5217ECF4528B4AC9A /* TerrariumConfig.swift in Sources */,
 				BC74AE57E83DCC133989A7C9 /* TerrariumRenderer.swift in Sources */,

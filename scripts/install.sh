@@ -25,15 +25,18 @@ echo ""
 # --- Check required dependencies ---
 MISSING_REQUIRED=0
 
-# Node.js >= 22
+# Maintained, prebuild-verified Node.js lines. Node 20 is EOL, and accepting
+# every odd release would promise native-module support after those short-lived
+# lines leave maintenance.
 if command -v node &>/dev/null; then
   NODE_VER=$(node -v | sed 's/v//' | cut -d. -f1)
-  if [ "$NODE_VER" -ge 22 ]; then
-    ok "Node.js $(node -v)"
-  else
-    fail "Node.js $(node -v) — version 22+ required (Node 20 EOL April 2026)"
-    MISSING_REQUIRED=1
-  fi
+  case "$NODE_VER" in
+    22|24|26) ok "Node.js $(node -v)" ;;
+    *)
+      fail "Node.js $(node -v) — supported versions are 22, 24, and 26 (Node 20 reached EOL in April 2026)"
+      MISSING_REQUIRED=1
+      ;;
+  esac
 else
   fail "Node.js not found"
   MISSING_REQUIRED=1
@@ -161,6 +164,12 @@ pnpm link --global 2>/dev/null || {
   warn "Run: cd bridge && pnpm link --global"
 }
 ok "agentdeck CLI linked"
+
+if node "$PROJECT_DIR/bridge/dist/cli.js" diag native >/dev/null; then
+  ok "APME native database ready for $(node -v)"
+else
+  warn "APME native database is unavailable; run 'agentdeck diag native' for the exact runtime and recovery."
+fi
 
 echo ""
 

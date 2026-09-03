@@ -180,7 +180,13 @@ import { LegacyRearmLedger } from './legacy-rearm-ledger.js';
 import { CodexOtelTracker, CODEX_OTEL_TRACES_PATH, spanNameSummary } from './codex-otel.js';
 import { HookCodexSessions } from './hook-codex-sessions.js';
 import { ObservedTurnWatchdogs } from './observed-turn-watchdogs.js';
-import { initApme, isTimelineProjectionEnabled, loadApmeConfig, type ApmeModule } from './apme/index.js';
+import {
+  getApmeInitFailure,
+  initApme,
+  isTimelineProjectionEnabled,
+  loadApmeConfig,
+  type ApmeModule,
+} from './apme/index.js';
 import { taskGradeability, retractUngradeableVerdicts } from './apme/task-gradeability.js';
 import { resolveStopResponse } from './hook-response-source.js';
 import { scheduleDeferredReplyRead } from './deferred-reply-read.js';
@@ -1900,7 +1906,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
               dbPath: apme.store.dbPath,
               judgeBackend: apme.runner.lastBackendProbe ?? { status: 'unknown', backend: loadApmeConfig().judge.backend },
             }
-          : { enabled: false, error: apme === null ? 'see startup logs (initApme returned null)' : 'unknown' },
+          : {
+              enabled: false,
+              error: getApmeInitFailure() ?? 'unknown init failure',
+            },
       }));
       return;
     }
@@ -2953,6 +2962,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
         // for an idle parent waiting on eight children is never.
         if (childResult?.censusChangedFor) {
           core.broadcastSessionsList().catch(() => {});
+        }
+        if (childResult?.sampleEvent) {
+          apme?.collector.noteSubagentLifecycle(earlyHookSid, childResult.sampleEvent);
         }
         const childHook = childResult?.childOnly === true;
         if (childHook) {

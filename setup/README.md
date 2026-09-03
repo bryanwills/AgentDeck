@@ -10,7 +10,7 @@ npx @agentdeck/setup
 
 That is the whole install, on every platform. The wizard:
 
-1. Checks prerequisites (Node.js 22+, your agent CLIs, platform build tools)
+1. Checks prerequisites (Node.js 22, 24, or 26; your agent CLIs; platform build tools)
 2. Installs the [`@agentdeck/bridge`](https://www.npmjs.com/package/@agentdeck/bridge) package globally — this provides the `agentdeck` CLI and the local daemon
 3. Registers Claude Code lifecycle hooks so sessions report state automatically
 4. Seeds the local data directory
@@ -34,7 +34,7 @@ No Stream Deck required — the daemon is the product; decks and other devices a
 
 ## Platform notes
 
-**Node.js 22 or later** is required everywhere. Native modules (`node-pty`, `sharp`, `better-sqlite3`) install from prebuilt binaries first; a compiler is only needed if a prebuild is missing for your platform. On macOS, AgentDeck repairs the known missing execute bit in the stable node-pty `spawn-helper` at first PTY use, including for direct bridge installs.
+**Node.js 22, 24, or 26** is required everywhere. Node 20 reached end of life in April 2026 and is intentionally unsupported; short-lived odd Node releases are unsupported as well. Native modules (`node-pty`, `sharp`, `better-sqlite3`) install from prebuilt binaries first. Setup runs `agentdeck diag native` after installing the bridge so a missing SQLite binding is reported before the daemon starts recording sessions. On macOS, AgentDeck repairs the known missing execute bit in the stable node-pty `spawn-helper` at first PTY use, including for direct bridge installs.
 
 ### macOS
 

@@ -170,6 +170,7 @@ Enterprise and shared-network posture](daemon.md#enterprise-and-shared-network-p
 | `agentdeck diag` | Daemon diagnostic dump (`-a` for AI analysis) |
 | `agentdeck diag agents [--json]` | Privacy-safe installed-version and compatibility report for normal Claude/Codex/OpenCode launches; no daemon required |
 | `agentdeck diag kiro [--json]` | Privacy-safe Kiro passive-observation diagnostic; no daemon required |
+| `agentdeck diag native [--json]` | Open an in-memory APME database under the current Node executable and report its version, ABI, native-binding status, and recovery; no daemon required |
 | `agentdeck inject-test` | Exercise observed-answer injection against one host, for tuning (`--tty <ttysNNN>` or `--app <Name>`; `--label <text>`, `-i <n>`, `--text <text>`) |
 
 ### Weather context

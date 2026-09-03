@@ -670,7 +670,8 @@ export class ApmeStore {
       try {
         Ctor = require('better-sqlite3') as new (path: string) => BetterSqliteDb;
       } catch (err) {
-        this.lastInitError = `better-sqlite3 native binding unavailable (${String(err).slice(0, 200)}). Run \`pnpm install\` in bridge/.`;
+        this.lastInitError =
+          `better-sqlite3 native binding unavailable (${String(err).slice(0, 200)})`;
         debug('APME', this.lastInitError);
         return false;
       }
@@ -2110,6 +2111,16 @@ function sampleEventRowToTrajectory(r: ApmeSampleEventRow): TrajectoryEvent | nu
       return { ...base, kind: 'model', model: r.model ?? 'unknown', inputTokens: r.inputTokens ?? 0, outputTokens: r.outputTokens ?? 0, costUsd: r.costUsd ?? 0, latencyMs: r.latencyMs ?? 0 };
     case 'tool':
       return { ...base, kind: 'tool', name: r.toolName ?? 'tool', input: p.input, output: p.output, error: r.toolError ?? null, status: (r.toolStatus as 'pending' | 'success' | 'error' | undefined) ?? undefined };
+    case 'subagent':
+      return {
+        ...base,
+        kind: 'subagent',
+        id: (p.id as string) ?? 'unknown',
+        name: (p.name as string) ?? 'Subagent',
+        phase: p.phase === 'completed' ? 'completed' : 'started',
+        summary: (p.summary as string | null) ?? null,
+        durationMs: typeof p.durationMs === 'number' ? p.durationMs : null,
+      };
     case 'state':
       return { ...base, kind: 'state', from: (p.from as string | null) ?? null, to: (p.to as string) ?? 'unknown' };
     case 'info':

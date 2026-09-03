@@ -75,7 +75,7 @@ exact split is documented in
 [docs/appstore-feature-matrix.md](docs/appstore-feature-matrix.md).
 
 **The CLI path needs:** macOS 15+, Windows 11 ([guide](docs/windows.md)), or Linux
-([guide](docs/linux.md)); Node.js 22+; and at least one supported agent. The native
+([guide](docs/linux.md)); Node.js 22, 24, or 26; and at least one supported agent. The native
 App Store dashboard instead requires macOS 26+ and needs no Node.js. iPhone/iPad
 companions require iOS/iPadOS 17+.
 

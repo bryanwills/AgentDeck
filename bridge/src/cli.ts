@@ -1411,8 +1411,19 @@ daemon
     const targetPort = registryPort ?? port;
     try {
       const res = await fetch(`http://127.0.0.1:${targetPort}/health`);
-      const data = await res.json() as Record<string, unknown>;
+      const data = (await res.json()) as Record<string, unknown>;
       log(`Daemon status (port ${targetPort}): ${JSON.stringify(data, null, 2)}`);
+      const apmeHealth = data.apme as
+        | { enabled?: unknown; error?: unknown }
+        | undefined;
+      if (apmeHealth?.enabled === false) {
+        log(
+          `WARNING: APME evaluation is disabled${typeof apmeHealth.error === 'string' ? ` — ${apmeHealth.error}` : '.'}`,
+        );
+        log(
+          'Run `agentdeck diag native` for the exact Node executable, ABI, and recovery command.',
+        );
+      }
       // A daemon on a fallback port keeps working — clients resolve it from
       // daemon.json — so nothing else ever says it happened. Without this line
       // the only symptom is that the canonical port is owned by nobody.
@@ -1510,6 +1521,17 @@ daemon
   .option('--loopback', 'Alias for --enterprise')
   .action(async (opts) => {
     const postureArgs = daemonPostureArgs(opts);
+    const {
+      collectNativeDependencyDiagnostic,
+      formatNativeDependencyDiagnosticReport,
+    } = await import('./native-dependency-diagnostics.js');
+    const nativeReport = collectNativeDependencyDiagnostic();
+    if (!nativeReport.ok) {
+      log(
+        'WARNING: daemon autostart will be registered, but APME evaluation cannot start under this runtime.',
+      );
+      log(formatNativeDependencyDiagnosticReport(nativeReport));
+    }
     if (postureArgs.length > 0) {
       log(`Autostart posture: ${postureArgs.join(' ')} (baked into the autostart unit's arguments).`);
     }
@@ -2523,15 +2545,15 @@ program
 
 program
   .command('diag [target]')
-  .description('Generate a diagnostic dump, or a privacy-safe agent diagnostic')
+  .description('Generate a diagnostic dump, or a focused agent/native-runtime diagnostic')
   .option('-p, --port <port>', 'Bridge server port', String(BRIDGE_WS_PORT))
   .option('-a, --analyze', 'Run AI analysis on the dump')
   .option('-t, --tail <lines>', 'Number of journal entries', '200')
   .option('--json', 'Print target diagnostics as machine-readable JSON')
   .action(async (target, opts) => {
     if (target) {
-      if (target !== 'kiro' && target !== 'agents') {
-        log(`Unknown diagnostic target: ${target}. Supported targets: agents, kiro`);
+      if (target !== 'kiro' && target !== 'agents' && target !== 'native') {
+        log(`Unknown diagnostic target: ${target}. Supported targets: agents, kiro, native`);
         process.exitCode = 1;
         return;
       }
@@ -2545,6 +2567,18 @@ program
           await import('./agent-cli-diagnostics.js');
         const report = collectAgentCliDiagnosticReport();
         process.stdout.write(`${opts.json ? JSON.stringify(report, null, 2) : formatAgentCliDiagnosticReport(report)}\n`);
+        return;
+      }
+      if (target === 'native') {
+        const {
+          collectNativeDependencyDiagnostic,
+          formatNativeDependencyDiagnosticReport,
+        } = await import('./native-dependency-diagnostics.js');
+        const report = collectNativeDependencyDiagnostic();
+        process.stdout.write(
+          `${opts.json ? JSON.stringify(report, null, 2) : formatNativeDependencyDiagnosticReport(report)}\n`,
+        );
+        if (!report.ok) process.exitCode = 1;
         return;
       }
       const { collectKiroDiagnosticReport, formatKiroDiagnosticReport } = await import('./kiro-diagnostics.js');

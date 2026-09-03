@@ -556,13 +556,16 @@ export async function startSession(opts: SessionOptions): Promise<void> {
   });
   adapter.on('event', (evt: AdapterEvent) => {
     if (evt.source !== 'hook') return;
-    subagentTimeline.handle({
+    const result = subagentTimeline.handle({
       eventName: evt.event,
       payload: evt.data ?? {},
       sessionId: core.sessionId,
       agentType,
       projectName: core.projectName,
     });
+    if (result.sampleEvent) {
+      apme?.collector.noteSubagentLifecycle(core.sessionId, result.sampleEvent);
+    }
   });
 
   // Claude Code hook events → timeline entries

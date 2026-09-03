@@ -28,6 +28,19 @@ export interface SubagentTimelineResult {
    * the hook path would notice.
    */
   censusChangedFor?: string;
+  /** Lifecycle evidence for the parent task's SessionSample. Child hooks are
+   *  consumed before the normal APME path, so this explicit handoff is the
+   *  only honest producer for SampleModelConfig.subagents and graph nodes. */
+  sampleEvent?: SubagentSampleEvent;
+}
+
+export interface SubagentSampleEvent {
+  id: string;
+  name: string;
+  phase: 'started' | 'completed';
+  ts: number;
+  startedAt?: number;
+  summary?: string;
 }
 
 type TimelineEmitter = (entry: TimelineEntry, upsert?: boolean) => void;
@@ -224,7 +237,16 @@ export class SubagentTimelineTracker {
         subagentId: census.burstId,
         summaryKind: 'progress',
       }, true);
-      return { childOnly: true, censusChangedFor: hook.sessionId };
+      return {
+        childOnly: true,
+        censusChangedFor: hook.sessionId,
+        sampleEvent: {
+          id,
+          name: childHandle(label, agentId),
+          phase: 'started',
+          ts: startedAt,
+        },
+      };
     }
 
     if (event === 'subagent_stop') {
@@ -263,7 +285,18 @@ export class SubagentTimelineTracker {
         subagentId: `child:${hook.sessionId}:${id}`,
         summaryKind: summary.summaryKind,
       });
-      return { childOnly: true, censusChangedFor: hook.sessionId };
+      return {
+        childOnly: true,
+        censusChangedFor: hook.sessionId,
+        sampleEvent: {
+          id: id || `anonymous:${endedAt}`,
+          name: handle,
+          phase: 'completed',
+          ts: endedAt,
+          ...(active ? { startedAt: active.startedAt } : {}),
+          summary: summary.text,
+        },
+      };
     }
 
     if (event === 'task_completed') {
@@ -280,7 +313,16 @@ export class SubagentTimelineTracker {
         endedAt,
         summaryKind: summary.summaryKind,
       });
-      return { childOnly: true };
+      return {
+        childOnly: true,
+        sampleEvent: {
+          id: nonEmptyString(hook.payload.task_id) ?? `team:${label}:${endedAt}`,
+          name: label,
+          phase: 'completed',
+          ts: endedAt,
+          summary: summary.text,
+        },
+      };
     }
 
     // Idle is lifecycle metadata, not a useful Timeline row. Consume it so it

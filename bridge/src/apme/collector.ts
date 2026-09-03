@@ -23,12 +23,13 @@ import type { UsageSnapshot } from '../types.js';
 import type { SessionEntry } from '../session-registry.js';
 import type { ApmeStore } from './store.js';
 import type { ApmeRunRow, ApmeTaskRow } from './types.js';
-import type { AgentType, TelemetrySpan, ApmeSampleEventRow, TrajectoryEventKind, TurnEndSource } from '@agentdeck/shared';
+import type { AgentType, TelemetrySpan, ApmeSampleEventRow, SampleModelConfig, TrajectoryEventKind, TurnEndSource } from '@agentdeck/shared';
 import { AGENT_IDLE_GAP_MS, deriveTaskTitle, isPricedModel, normalizeModelProvider, priceUsd } from '@agentdeck/shared';
 import type { ApmeHwSampler } from './hw-sampler.js';
 import { classifyRunSmart, computeSignals, classify } from './classifier.js';
 import { readOpenTurnEvidence, claudeTurnCompletionSince, type OpenTurnEvidence, type ClaudeTurnCompletion } from './claude-transcript-reader.js';
 import { codexTurnCompletionSince, type CodexTurnCompletion } from '../codex-rollout-response.js';
+import type { SubagentSampleEvent } from '../subagent-timeline.js';
 
 export interface OpenRunInput {
   sessionId: string;
@@ -1216,6 +1217,79 @@ export class ApmeCollector {
     }
   }
 
+  /** Persist a child-agent lifecycle event on its parent task. Child hooks are
+   *  deliberately consumed before ordinary APME ingestion so they cannot
+   *  mutate parent state or controls; SubagentTimelineTracker explicitly
+   *  hands just this observation-safe evidence back to the collector.
+   *
+   *  This is the producer for SampleModelConfig.subagents. The richer event
+   *  also powers the judge rollup and Graph node without promoting a child to
+   *  a separately steerable session. Returns false when no parent task is
+   *  active, which is honest: there is no task edge to guess. */
+  noteSubagentLifecycle(sessionId: string, event: SubagentSampleEvent): boolean {
+    if (!this.store.enabled) return false;
+    const ctx = this.sampleCtxForTurn(sessionId);
+    if (!ctx) return false;
+    const task = this.store.getTask(ctx.taskId);
+    if (!task) return false;
+
+    const name = event.name.trim();
+    if (!name) return false;
+    try {
+      this.store.updateTask(ctx.taskId, {
+        modelConfig: this.mergedTaskModelConfig(task, undefined, undefined, name),
+      });
+    } catch { /* keep the lifecycle event even if the header update failed */ }
+
+    const durationMs = event.startedAt == null
+      ? null
+      : Math.max(0, event.ts - event.startedAt);
+    this.appendSampleEvent(ctx, {
+      kind: 'subagent',
+      ts: event.ts,
+      dedupCore: `${event.phase}:${event.id}`,
+      payloadObj: {
+        id: event.id,
+        name,
+        phase: event.phase,
+        ...(event.summary ? { summary: event.summary } : {}),
+        ...(durationMs == null ? {} : { durationMs }),
+      },
+    });
+    return true;
+  }
+
+  /** Merge instead of replacing the sample identity header. Model updates can
+   *  arrive after subagent starts (and vice versa); overwriting model_config
+   *  here was why a future subagents producer would have appeared to work and
+   *  then silently vanished on the next usage/model hook. */
+  private mergedTaskModelConfig(
+    task: ApmeTaskRow,
+    modelId?: string | null,
+    provider?: string | null,
+    subagent?: string,
+  ): string {
+    let previous: Partial<SampleModelConfig> = {};
+    if (task.modelConfig) {
+      try {
+        const parsed = JSON.parse(task.modelConfig) as unknown;
+        if (parsed && typeof parsed === 'object') previous = parsed as Partial<SampleModelConfig>;
+      } catch { /* malformed legacy value: rebuild from row columns */ }
+    }
+    const subagents = new Set(
+      Array.isArray(previous.subagents)
+        ? previous.subagents.filter((v): v is string => typeof v === 'string' && v.length > 0)
+        : [],
+    );
+    if (subagent) subagents.add(subagent);
+    return JSON.stringify({
+      ...previous,
+      modelId: modelId ?? task.modelId ?? previous.modelId ?? 'unknown',
+      provider: provider === undefined ? (task.provider ?? previous.provider ?? null) : provider,
+      ...(subagents.size > 0 ? { subagents: [...subagents].sort() } : {}),
+    });
+  }
+
   /** Reverse-lookup sessionId for a runId (best-effort; only the live map). */
   private runToSessionId(runId: string): string {
     for (const [sid, rid] of this.sessionToRun) if (rid === runId) return sid;
@@ -1572,14 +1646,15 @@ export class ApmeCollector {
       ?? run?.provider
       ?? normalizeModelProvider(undefined, model);
     const taskRow = this.store.getTask(task.id);
+    if (!taskRow) return;
     const taskModel = !model
-      ? taskRow?.modelId
-      : !taskRow?.modelId || taskRow.modelId === model
+      ? taskRow.modelId
+      : !taskRow.modelId || taskRow.modelId === model
         ? model
         : 'mixed';
     const taskProvider = !provider || provider === 'unknown'
-      ? taskRow?.provider
-      : !taskRow?.provider || taskRow.provider === provider
+      ? taskRow.provider
+      : !taskRow.provider || taskRow.provider === provider
         ? provider
         : 'mixed';
     const turnIndex = this.sessionToTurn.get(sessionId)?.index ?? task.lastTurnIndex ?? 0;
@@ -1595,10 +1670,9 @@ export class ApmeCollector {
       this.store.updateTask(task.id, {
         modelId: taskModel,
         provider: taskProvider,
-        modelConfig: JSON.stringify({
-          modelId: taskModel ?? 'unknown',
-          provider: taskProvider ?? null,
-        }),
+        modelConfig: this.mergedTaskModelConfig(
+          taskRow, taskModel ?? 'unknown', taskProvider ?? null,
+        ),
       });
       this.store.recomputeSampleCost(task.id);
     } catch { /* ignore */ }
@@ -1703,7 +1777,7 @@ export class ApmeCollector {
       this.store.updateTask(taskId, {
         modelId: taskModel,
         provider: taskProvider,
-        modelConfig: JSON.stringify({ modelId: taskModel, provider: taskProvider }),
+        modelConfig: this.mergedTaskModelConfig(task, taskModel, taskProvider),
       });
     } catch { /* ignore */ }
   }

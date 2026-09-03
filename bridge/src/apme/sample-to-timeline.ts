@@ -83,6 +83,11 @@ export function sampleEventToTimeline(
         ...(row.toolError ? { detail: String(row.toolError).slice(0, 1000) } : {}),
       };
     }
+    case 'subagent':
+      // SubagentTimelineTracker already emits the folded dispatch/completion
+      // rows directly. The sample copy is evaluation/graph evidence; projecting
+      // it again would duplicate the visible lifecycle.
+      return null;
     case 'state':
       return null; // state transitions are not standalone timeline rows
     case 'info': {

@@ -8,16 +8,20 @@ describe('SubagentTimelineTracker', () => {
     let now = 1_000;
     const tracker = new SubagentTimelineTracker((entry) => entries.push(entry), () => now);
 
-    expect(tracker.handle({
+    const started = tracker.handle({
       eventName: 'SubagentStart',
       payload: { agent_id: 'child-1', agent_type: 'Explore' },
       sessionId: 'parent-1',
       agentType: 'claude-code',
       projectName: 'AgentDeck',
-    }).childOnly).toBe(true);
+    });
+    expect(started.childOnly).toBe(true);
+    expect(started.sampleEvent).toEqual({
+      id: 'child-1', name: 'Explore#ild1', phase: 'started', ts: 1_000,
+    });
 
     now = 4_000;
-    expect(tracker.handle({
+    const completed = tracker.handle({
       eventName: 'SubagentStop',
       payload: {
         agent_id: 'child-1',
@@ -27,7 +31,13 @@ describe('SubagentTimelineTracker', () => {
       sessionId: 'parent-1',
       agentType: 'claude-code',
       projectName: 'AgentDeck',
-    }).childOnly).toBe(true);
+    });
+    expect(completed.childOnly).toBe(true);
+    expect(completed.sampleEvent).toMatchObject({
+      id: 'child-1', name: 'Explore#ild1', phase: 'completed',
+      ts: 4_000, startedAt: 1_000,
+      summary: '인증 흐름에서 경쟁 조건 2건을 확인했습니다.',
+    });
 
     expect(entries).toHaveLength(2);
     expect(entries[0]).toMatchObject({

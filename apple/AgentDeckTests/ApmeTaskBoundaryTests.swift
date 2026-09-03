@@ -1290,6 +1290,103 @@ final class ApmeTaskBoundaryTests: XCTestCase {
         XCTAssertNotNil(collector.activeTaskId(sessionId: "sess-B"), "B's task survives A's session_end")
     }
 
+    // MARK: - Subagent census → SessionSample producer
+
+    func testSubagentLifecyclePersistsAcrossModelUpdateAndReachesRollup() async throws {
+        let tmp = try makeTempStore()
+        defer { cleanup(tmp) }
+        let collector = ApmeCollector(store: tmp.store)
+        let sid = "parent-subagent"
+
+        collector.handleHook(event: "session_start", data: [
+            "session_id": sid,
+            "agent_type": "claude-code",
+            "model_name": "claude-opus-5",
+        ])
+        collector.handleHook(event: "UserPromptSubmit", data: [
+            "session_id": sid,
+            "prompt": "review the authentication changes in parallel",
+        ])
+        guard let taskId = collector.activeTaskId(sessionId: sid) else {
+            return XCTFail("active parent task missing")
+        }
+
+        XCTAssertTrue(collector.noteSubagentLifecycle(
+            sessionId: sid,
+            id: "child-review-2",
+            name: "reviewer#iew2",
+            phase: "started",
+            ts: 1_000
+        ))
+        collector.updateTurnIdentity(
+            modelId: "claude-opus-5-1", provider: "anthropic", sessionId: sid)
+        XCTAssertTrue(collector.noteSubagentLifecycle(
+            sessionId: sid,
+            id: "child-review-2",
+            name: "reviewer#iew2",
+            phase: "completed",
+            ts: 6_000,
+            startedAt: 1_000,
+            summary: "Found two authentication race conditions."
+        ))
+
+        guard let sample = tmp.store.getSampleDict(taskId),
+              let model = sample["model"] as? [String: Any],
+              let events = sample["events"] as? [[String: Any]] else {
+            return XCTFail("sample missing")
+        }
+        XCTAssertEqual(model["modelId"] as? String, "claude-opus-5-1")
+        XCTAssertEqual(model["subagents"] as? [String], ["reviewer#iew2"])
+        let children = events.filter { ($0["kind"] as? String) == "subagent" }
+        XCTAssertEqual(children.count, 2)
+        XCTAssertEqual(children.last?["durationMs"] as? Int, 5_000)
+
+        let trajectory = ApmeRunner.buildTrajectoryLines(sample: sample)
+        XCTAssertTrue(trajectory.contains(
+            "  subagent reviewer#iew2 → completed (5s): Found two authentication race conditions."))
+        let prompt = ApmeRunner.buildTaskJudgePrompt(
+            rubricPrompt: "rubric",
+            category: "code",
+            boundarySignal: "session_end",
+            turns: tmp.store.listTurnsForTask(taskId),
+            sample: sample
+        )
+        XCTAssertTrue(prompt.contains("--- TASK TRAJECTORY ---"))
+        XCTAssertTrue(prompt.contains("subagent reviewer#iew2 → completed"))
+
+        var graphOptions = ApmeGraphProjection.Options()
+        graphOptions.minHubDegree = 1
+        graphOptions.includeTurns = false
+        let graph = ApmeGraphProjection.build(store: tmp.store, options: graphOptions)
+        let nodes = graph["nodes"] as? [[String: Any]] ?? []
+        let edges = graph["edges"] as? [[String: Any]] ?? []
+        let childId = "subagent:\(sid):child-review-2"
+        let child = nodes.first { ($0["id"] as? String) == childId }
+        XCTAssertEqual(child?["kind"] as? String, "subagent")
+        XCTAssertEqual((child?["meta"] as? [String: Any])?["phase"] as? String, "completed")
+        XCTAssertTrue(edges.contains {
+            ($0["from"] as? String) == "task:\(taskId)"
+                && ($0["to"] as? String) == childId
+                && ($0["kind"] as? String) == "delegated"
+        })
+    }
+
+    func testSubagentLifecycleRefusesMissingParentTask() async throws {
+        let tmp = try makeTempStore()
+        defer { cleanup(tmp) }
+        let collector = ApmeCollector(store: tmp.store)
+        collector.handleHook(event: "session_start", data: [
+            "session_id": "parent-no-task", "agent_type": "codex-cli",
+        ])
+        XCTAssertFalse(collector.noteSubagentLifecycle(
+            sessionId: "parent-no-task",
+            id: "child-1",
+            name: "reviewer#ild1",
+            phase: "started",
+            ts: 1_000
+        ))
+    }
+
     // MARK: - task_rollup rubric seeded
 
     func testTaskRollupRubricSeededOnOpen() async throws {
@@ -1485,6 +1582,52 @@ final class ApmeTaskBoundaryTests: XCTestCase {
             let coord = ActionFoldRules.agentCoordinationSummary(tools)
             XCTAssertEqual(coord?.dispatches, v.coordination?.dispatches, v.note)
             XCTAssertEqual(coord?.messages, v.coordination?.messages, v.note)
+        }
+    }
+
+    /// Same contract for the task-gradeability mirror: tasks with no agent
+    /// work, abort notices only, or a trivial exchange are retained but never
+    /// sent to the judge. The generated rule and both language suites replay
+    /// this one vector file so the two daemons cannot silently diverge.
+    func testTaskGradeabilityMatchesSharedVectors() async throws {
+        struct Turn: Decodable {
+            let prompt: String?
+            let response: String?
+            let toolCalls: Int?
+            let filesModified: Int?
+            let filesCreated: Int?
+            let endSource: String?
+            let efficiencyJson: String?
+
+            var row: [String: Any] {
+                var row: [String: Any] = [:]
+                if let prompt { row["prompt"] = prompt }
+                if let response { row["response"] = response }
+                if let toolCalls { row["tool_calls"] = toolCalls }
+                if let filesModified { row["files_modified"] = filesModified }
+                if let filesCreated { row["files_created"] = filesCreated }
+                if let endSource { row["end_source"] = endSource }
+                if let efficiencyJson { row["efficiency_json"] = efficiencyJson }
+                return row
+            }
+        }
+        struct Vector: Decodable {
+            let turns: [Turn]
+            let expected: String?
+            let note: String
+        }
+        let vectorsURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("shared/task-gradeability-vectors.json")
+        let data = try Data(contentsOf: vectorsURL)
+        let vectors = try JSONDecoder().decode([Vector].self, from: data)
+        XCTAssertGreaterThanOrEqual(vectors.count, 10, "vector file too small to be a gate")
+        for v in vectors {
+            XCTAssertEqual(
+                TaskGradeabilityRules.notGradeableReason(v.turns.map(\.row)),
+                v.expected, v.note)
         }
     }
 

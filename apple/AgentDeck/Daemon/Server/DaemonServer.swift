@@ -4869,7 +4869,8 @@ final class DaemonServer {
         // metadata are consumed without a row.
         if hasChildIdentity
             && event != "subagent_start" && event != "subagent_stop"
-            && event != "codex_subagent_start" && event != "codex_subagent_stop" {
+            && event != "codex_subagent_start" && event != "codex_subagent_stop"
+            && event != "task_completed" {
             return true
         }
         if event == "teammate_idle" { return true }
@@ -4935,6 +4936,13 @@ final class DaemonServer {
             entry.summaryKind = "progress"
             entry.subagentId = census.burstId
             await timelineStore.upsert(entry, bypassSuppression: true)
+            apmeCollector?.noteSubagentLifecycle(
+                sessionId: sid,
+                id: identity,
+                name: Self.subagentHandle(label: label, agentId: agentId),
+                phase: "started",
+                ts: Int(now)
+            )
             broadcastRaw([
                 "type": "timeline_event",
                 "entry": claudeCodeEntryDict(entry),
@@ -4967,6 +4975,14 @@ final class DaemonServer {
             entry.endedAt = now
             entry.summaryKind = subject == nil ? "none" : "heuristic"
             await timelineStore.add(entry, bypassSuppression: true)
+            apmeCollector?.noteSubagentLifecycle(
+                sessionId: sid,
+                id: clean(json["task_id"]) ?? "team:\(label):\(Int(now))",
+                name: label,
+                phase: "completed",
+                ts: Int(now),
+                summary: summary
+            )
             broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(entry)])
             return true
         }
@@ -5013,6 +5029,15 @@ final class DaemonServer {
         entry.summaryKind = response == nil ? "none" : "heuristic"
         entry.subagentId = "child:\(sid):\(identity)"
         await timelineStore.add(entry, bypassSuppression: true)
+        apmeCollector?.noteSubagentLifecycle(
+            sessionId: sid,
+            id: identity,
+            name: handle,
+            phase: "completed",
+            ts: Int(now),
+            startedAt: active.map { Int($0.startedAt) },
+            summary: summary
+        )
         broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(entry)])
         broadcastSessionsList()
         return true

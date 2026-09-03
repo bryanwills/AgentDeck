@@ -141,9 +141,9 @@ efficiency_json, composite_score
 `runs → tasks → turns → sample_events` 는 실제 FK 를 가진 containment tree 라 그대로 그래프가 된다. 하지만 **작업 단위끼리 이어주는 간선**(공통 조상이 없는 두 task 의 연결)은 컬럼에 문자열로 눌려 있었다. 그래서:
 
 - **스키마로 고친 것** — `sample_events.turn_id`(기존엔 run 안에서만 유일한 `turn_index` 뿐이라 event→turn 엣지가 아예 없었음), `runs.parent_run_id`(위 참고). 둘 다 마이그레이션에서 backfill.
-- **투영으로 유도하는 것** — session / project / model / agent / tool / file 은 행이 아니라 컬럼·payload 이므로 `bridge/src/apme/graph.ts` 가 노드로 materialize 한다. 특히 **file 노드**는 tool payload 의 `file_path` 에서 뽑아 run 의 `project_path` 기준 상대경로로 키잉하므로, 같은 파일을 worktree 와 본 체크아웃에서 만졌어도 한 노드로 합쳐진다. 커버리지는 부분적이다(경로를 받지 않는 Bash/WebFetch 등) — `stats.fileCoverage` 가 그 비율을 그대로 보고한다.
+- **투영으로 유도하는 것** — session / project / model / agent / tool / subagent / file 은 행이 아니라 컬럼·payload 이므로 그래프 빌더가 노드로 materialize 한다. subagent 는 census 가 부모 task 의 sample 에 쓴 lifecycle event 에서 나오며 `delegated` 엣지로 연결된다. 특히 **file 노드**는 tool payload 의 `file_path` 에서 뽑아 run 의 `project_path` 기준 상대경로로 키잉하므로, 같은 파일을 worktree 와 본 체크아웃에서 만졌어도 한 노드로 합쳐진다. 커버리지는 부분적이다(경로를 받지 않는 Bash/WebFetch 등) — `stats.fileCoverage` 가 그 비율을 그대로 보고한다.
 
-모델 정의는 `shared/src/apme-graph.ts`(SSOT), 빌더는 `bridge/src/apme/graph.ts`, 노출은 `GET /apme/graph`, 뷰어는 대시보드 **Graph** 탭(외부 라이브러리 없이 canvas force layout — 대시보드는 self-contained HTML 이라 CDN 을 못 쓴다).
+모델 정의는 `shared/src/apme-graph.ts`(SSOT), 빌더는 Node `bridge/src/apme/graph.ts`와 Swift `ApmeGraphProjection.swift`, 노출은 양 데몬의 `GET /apme/graph`, 뷰어는 대시보드 **Graph** 탭(외부 라이브러리 없이 canvas force layout — 대시보드는 self-contained HTML 이라 CDN 을 못 쓴다).
 
 투영은 파생물이며 저장하지 않는다 — 마이그레이션 없이 형태를 바꿀 수 있다.
 
@@ -659,18 +659,34 @@ arm, min-turn-age 가드 포함 — arm 지점은 다르지만 상수는 한 사
 `apme-collector.test.ts`(codex next-prompt 회수·늦은 응답 창), `apme-claude-turn-completion.test.ts`,
 `codex-rollout-response.test.ts`(실패 완료), `apme-task-boundary.test.ts`(보류 만료).
 
-**Swift 데몬 미러 결정.** Swift `ApmeRunner.enqueueTask` 는 `task_rollup` 을 그대로 judge 에
-보내며 gradeability 게이트·백로그 드레인·rehydrate 셋 다 없다. 셋은 성격이 다르다: `task-
-gradeability.ts` 는 turn 행에 대한 순수 규칙이므로 `generate-apme-display-rules` 계열로
-**생성**(`TaskGradeabilityRules.generated.swift` + 공유 벡터 파일)하고, 드레인 틱과 rehydrate
-는 데몬 상태 기계라 생성 대상이 아니며 Swift 에 손이식하되 `boundary_signal`/`end_source` 스탬프
-값을 공유 벡터로 고정한다. 순서는 gradeability 먼저 — App Store 데몬이 지금 침묵을 채점하고
-있는 건 그 게이트 부재 때문이다. 이 라운드에서는 결정만 했고 구현은 다음 차례다.
+**후속 라이브 측정(2026-09-04 07:56 KST).** 체크아웃 데몬 build `cbf78061aa2e`가
+13개 open run(8 task, 8 open turn)을 재수화했고, 그 자리에서 3개 turn을 에이전트 기록으로
+닫았다. MLX `/v1/models`는 30ms에 HTTP 200, health probe는
+`gemma-4-26b-a4b-it-4bit` ready(1.165s)로 회복했으며 22시 UTC 한 시간에 task 6건을 새로
+판정했다. 30일 backlog는 이전 301→현재 250, 전체 task judge는 808(30일 595)이다.
+commit `5ad609cf` 뒤 codex closed turn 표본은 stop 4/4가 모두 응답을 가져 응답 소스는
+정상이나, 새 `next_prompt` 표본은 아직 0이라 그 복구 분기의 잔여 손실률은 더 쌓여야 한다.
+같은 이유로 이번 재시작 뒤 2시간이 지나지 않아 provisional adoption reaper의 새 실물 표본은
+아직 없다(회귀 테스트는 통과). 반면 P5 producer는 재시작 74초 뒤 다른 Claude 세션의 실제
+child completion을 `sample_events(kind='subagent')`로 기록했고, 같은 task의
+`model_config.subagents`와 `/apme/graph`의 subagent 노드·`delegated` 엣지를 실물로 확인했다.
 
-**잔여 개선안 현황(2026-09-03).** P5(a)(b) subagent rollup·Graph 노드와 P6 evidence tier 는
-미착수 — 둘 다 `SubagentTimelineTracker` 의 census 를 sample 로 끌어오는 producer 가 선행
-조건이고, `SampleModelConfig.subagents` 는 선언만 있고 producer 가 0 이라(grep 기준) 같은
-producer 가 채워야 할 슬롯이다. `/apme/pareto`·`/apme/recommend` 는 대시보드 Recommend 탭이
+**Swift 데몬 미러 상태(2026-09-04).** 순수 규칙인 gradeability 는 계획대로
+`generate-apme-display-rules` 가 `TaskGradeabilityRules.generated.swift` 를 생성하고,
+Node/Swift 가 `shared/task-gradeability-vectors.json` 을 같이 리플레이한다. Swift
+`ApmeRunner` 는 judge 호출 전에 같은 `no_reply`/`aborted_only`/`trivial` 판정을 적용해
+`notes_json.notGradeable` 을 남긴다. 백로그 드레인과 rehydrate 는 데몬 상태 기계라 여전히
+생성 대상이 아니며, Swift 데몬에 포팅할 때 `boundary_signal`/`end_source` 스탬프를 별도
+공유 벡터로 고정한다.
+
+**잔여 개선안 현황(2026-09-04).** P5(a)(b)는 완료했다. Node
+`SubagentTimelineTracker` 와 Swift `subagentCensus` 가 자식 hook 을 일반 APME 경로보다 먼저
+소비한 뒤, lifecycle 증거만 활성 부모 task 에 명시적으로 handoff 한다. 이 producer 가
+`sample_events.kind='subagent'` 와 `SampleModelConfig.subagents` 를 같이 채우며, 모델/사용량
+후속 hook 은 기존 model_config 를 병합해 그 값을 지우지 않는다. task judge rollup 은 자식의
+start/completion·duration·summary 를 읽고, 양 데몬의 `/apme/graph` 는 한 subagent 노드와
+`delegated` 엣지로 투영한다. 활성 부모 task 가 없으면 가장 최근 세션을 추측하지 않고 기록을
+거부한다. P6 evidence tier 는 여전히 미착수다. `/apme/pareto`·`/apme/recommend` 는 대시보드 Recommend 탭이
 쓰지 않아 "죽은" 라우트로 보이지만 Daemon HTTP API 표에 문서화되고 `apme-http.test.ts` 가
 고정하는 외부 표면이므로 유지 — 대시보드가 scorecard 로 자체 계산하는 것과 라우트가 같은
 `pareto.ts` 를 공유하는지는 다음에 라우트를 만질 때 확인한다.

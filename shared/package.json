@@ -2,7 +2,7 @@
   "name": "@agentdeck/shared",
   "version": "1.2.0",
   "engines": {
-    "node": ">=22"
+    "node": "22.x || 24.x || 26.x"
   },
   "description": "Shared protocol types and layout engines for AgentDeck (internal dependency of @agentdeck/bridge)",
   "type": "module",

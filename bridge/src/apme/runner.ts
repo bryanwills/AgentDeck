@@ -372,7 +372,7 @@ export class ApmeRunner {
       '',
       '--- TURNS ---',
       ...lines,
-      ...(trajectoryLines.length ? ['', '--- TOOL TRAJECTORY ---', ...trajectoryLines] : []),
+      ...(trajectoryLines.length ? ['', '--- TASK TRAJECTORY ---', ...trajectoryLines] : []),
       '',
       'Respond with strict JSON only.',
     ].join('\n');
@@ -876,6 +876,12 @@ export function buildTrajectoryLines(sample: SessionSample, cap = 30): string[] 
       case 'model':
         lines.push(`  model ${e.model}: ${e.inputTokens}in/${e.outputTokens}out tok${e.costUsd ? ` ($${e.costUsd.toFixed(4)})` : ''}`);
         break;
+      case 'subagent': {
+        const duration = e.durationMs == null ? '' : ` (${Math.round(e.durationMs / 1000)}s)`;
+        const summary = e.summary ? `: ${e.summary.slice(0, 160)}` : '';
+        lines.push(`  subagent ${e.name} → ${e.phase}${duration}${summary}`);
+        break;
+      }
       case 'state':
         lines.push(`  state → ${e.to}`);
         break;

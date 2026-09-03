@@ -1197,6 +1197,12 @@ final class ApmeStore: @unchecked Sendable {
             if let output = p["output"] { out["output"] = output }
             if let status = r["tool_status"] as? String { out["status"] = status }
             if let err = r["tool_error"] as? String { out["error"] = err }
+        case "subagent":
+            out["id"] = p["id"] as? String ?? "unknown"
+            out["name"] = p["name"] as? String ?? "Subagent"
+            out["phase"] = p["phase"] as? String ?? "completed"
+            if let summary = p["summary"] as? String { out["summary"] = summary }
+            if let durationMs = p["durationMs"] as? Int { out["durationMs"] = durationMs }
         case "state":
             out["from"] = p["from"]
             out["to"] = p["to"] as? String ?? "unknown"

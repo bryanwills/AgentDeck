@@ -5,9 +5,20 @@ import { beforeAll, describe, expect, it } from 'vitest';
 process.env.AGENTDECK_SETUP_NO_AUTORUN = '1';
 
 let parseSetupArgs: typeof import('../setup.js').parseSetupArgs;
+let isSupportedNodeMajor: typeof import('../setup.js').isSupportedNodeMajor;
 
 beforeAll(async () => {
-  ({ parseSetupArgs } = await import('../setup.js'));
+  ({ parseSetupArgs, isSupportedNodeMajor } = await import('../setup.js'));
+});
+
+describe('Node runtime support contract', () => {
+  it('accepts the maintained even release lines', () => {
+    expect([22, 24, 26].map(isSupportedNodeMajor)).toEqual([true, true, true]);
+  });
+
+  it('rejects EOL Node 20 and short-lived odd release lines', () => {
+    expect([20, 21, 23, 25, 27].map(isSupportedNodeMajor)).toEqual([false, false, false, false, false]);
+  });
 });
 
 describe('parseSetupArgs', () => {

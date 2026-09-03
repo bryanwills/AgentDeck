@@ -525,12 +525,10 @@ final class ApmeCollector {
         let taskModel = taskRow.modelId == nil || taskRow.modelId == model ? model : "mixed"
         let taskProvider: String? = normalized == nil ? taskRow.provider
             : (taskRow.provider == nil || taskRow.provider == normalized ? normalized : "mixed")
-        let config: [String: Any] = ["modelId": taskModel, "provider": taskProvider ?? NSNull()]
-        let configString = (try? JSONSerialization.data(withJSONObject: config))
-            .flatMap { String(data: $0, encoding: .utf8) }
         store.updateTask(id: task.id, fields: [
             "modelId": taskModel, "provider": taskProvider as Any?,
-            "modelConfig": configString as Any?,
+            "modelConfig": mergedTaskModelConfig(
+                task: taskRow, modelId: taskModel, provider: taskProvider) as Any?,
         ])
     }
 
@@ -580,12 +578,13 @@ final class ApmeCollector {
                 : (taskRow?.modelId == nil || taskRow?.modelId == model ? model : "mixed")
             let taskProvider = provider == nil ? taskRow?.provider
                 : (taskRow?.provider == nil || taskRow?.provider == provider ? provider : "mixed")
-            let mc: [String: Any] = ["modelId": taskModel ?? "unknown", "provider": taskProvider ?? NSNull()]
-            let mcStr = (try? JSONSerialization.data(withJSONObject: mc)).flatMap { String(data: $0, encoding: .utf8) }
-            store.updateTask(id: task.id, fields: [
-                "modelId": taskModel as Any?, "provider": taskProvider as Any?,
-                "modelConfig": mcStr as Any?,
-            ])
+            if let taskRow {
+                store.updateTask(id: task.id, fields: [
+                    "modelId": taskModel as Any?, "provider": taskProvider as Any?,
+                    "modelConfig": mergedTaskModelConfig(
+                        task: taskRow, modelId: taskModel, provider: taskProvider) as Any?,
+                ])
+            }
             store.recomputeSampleCost(task.id)
         }
     }
@@ -607,6 +606,90 @@ final class ApmeCollector {
         let normalized = raw.isEmpty ? ModelProviderRules.provider(model: model)
             : (ModelProviderRules.vendorPrefixes[raw] ?? ModelProviderRules.provider(model: model))
         return normalized == .unknown ? nil : normalized.rawValue
+    }
+
+    /// Merge instead of replacing the SessionSample identity header. Model
+    /// hooks and child lifecycle hooks can arrive in either order; preserving
+    /// the prior JSON prevents `subagents` (and future header fields) from
+    /// disappearing on the next usage update.
+    private func mergedTaskModelConfig(
+        task: ApmeTask,
+        modelId: String? = nil,
+        provider: String? = nil,
+        subagent: String? = nil
+    ) -> String? {
+        var config: [String: Any] = [:]
+        if let raw = task.modelConfig,
+           let data = raw.data(using: .utf8),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            config = parsed
+        }
+
+        let priorModel = config["modelId"] as? String
+        let priorProvider = config["provider"] as? String
+        config["modelId"] = modelId ?? task.modelId ?? priorModel ?? "unknown"
+        config["provider"] = provider ?? task.provider ?? priorProvider ?? NSNull()
+
+        var subagents = Set((config["subagents"] as? [Any] ?? []).compactMap { value -> String? in
+            guard let name = value as? String else { return nil }
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        })
+        if let subagent {
+            let trimmed = subagent.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { subagents.insert(trimmed) }
+        }
+        if !subagents.isEmpty { config["subagents"] = subagents.sorted() }
+
+        guard JSONSerialization.isValidJSONObject(config),
+              let data = try? JSONSerialization.data(withJSONObject: config),
+              let string = String(data: data, encoding: .utf8) else { return nil }
+        return string
+    }
+
+    /// Observation-safe handoff from the daemon's subagent census into the
+    /// active parent task. A child remains non-steerable and never enters the
+    /// ordinary hook state machine; only lifecycle evidence reaches APME.
+    /// Returns false when there is no active parent task rather than guessing
+    /// an edge from the most-recent session.
+    @discardableResult
+    func noteSubagentLifecycle(
+        sessionId: String,
+        id: String,
+        name: String,
+        phase: String,
+        ts: Int,
+        startedAt: Int? = nil,
+        summary: String? = nil
+    ) -> Bool {
+        guard phase == "started" || phase == "completed",
+              let task = sessionToTask[sessionId],
+              let taskRow = store.getTask(id: task.id) else { return false }
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else { return false }
+
+        if let modelConfig = mergedTaskModelConfig(task: taskRow, subagent: cleanName) {
+            store.updateTask(id: task.id, fields: ["modelConfig": modelConfig])
+        }
+
+        var payload: [String: Any] = [
+            "id": id,
+            "name": cleanName,
+            "phase": phase,
+        ]
+        if let summary, !summary.isEmpty { payload["summary"] = summary }
+        if let startedAt { payload["durationMs"] = max(0, ts - startedAt) }
+        let turnIndex = task.lastTurnIndex ?? task.firstTurnIndex ?? 0
+        appendSampleEvent(
+            taskId: task.id,
+            runId: task.runId,
+            turnIndex: turnIndex,
+            kind: "subagent",
+            core: "\(phase):\(id)",
+            ts: ts,
+            payload: payload
+        )
+        return true
     }
 
     // MARK: - Sibling session tracking

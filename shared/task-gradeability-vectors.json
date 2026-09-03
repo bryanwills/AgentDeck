@@ -1,0 +1,93 @@
+[
+  {
+    "turns": [],
+    "expected": "no_reply",
+    "note": "an empty task has no agent work"
+  },
+  {
+    "turns": [
+      { "prompt": "fix the flaky test", "response": null, "toolCalls": 2, "endSource": "stop" }
+    ],
+    "expected": "no_reply",
+    "note": "a thin replyless trajectory is not enough evidence"
+  },
+  {
+    "turns": [
+      { "prompt": "run the migration", "response": null, "toolCalls": 3, "endSource": "stop" }
+    ],
+    "expected": null,
+    "note": "three tool calls are independently gradeable work"
+  },
+  {
+    "turns": [
+      { "prompt": "create the report", "response": null, "toolCalls": 1, "filesCreated": 1, "endSource": "stop" }
+    ],
+    "expected": null,
+    "note": "a file write is independently gradeable work"
+  },
+  {
+    "turns": [
+      { "prompt": "finish the change", "response": "You've hit your session limit", "toolCalls": 9, "endSource": "aborted" }
+    ],
+    "expected": "aborted_only",
+    "note": "an abort notice and aborted tools are not the agent's work"
+  },
+  {
+    "turns": [
+      { "prompt": "finish the change", "response": "session limit", "endSource": "aborted" },
+      { "prompt": "retry", "response": null, "toolCalls": 1, "endSource": "stop" }
+    ],
+    "expected": "no_reply",
+    "note": "an aborted turn is ignored beside a thin real turn"
+  },
+  {
+    "turns": [
+      { "prompt": "finish the change", "response": "session limit", "endSource": "aborted" },
+      { "prompt": "retry the full change", "response": "Refactored the module and ran the tests.", "toolCalls": 4, "endSource": "stop" }
+    ],
+    "expected": null,
+    "note": "a real turn beside an aborted one remains gradeable"
+  },
+  {
+    "turns": [
+      { "prompt": "hello", "response": "Hi! How can I help?", "toolCalls": 0, "endSource": "stop" }
+    ],
+    "expected": "trivial",
+    "note": "a short tool-less greeting is not a task"
+  },
+  {
+    "turns": [
+      { "prompt": "why?", "response": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "toolCalls": 0, "endSource": "stop" }
+    ],
+    "expected": null,
+    "note": "a substantial answer to a short question is gradeable"
+  },
+  {
+    "turns": [
+      { "prompt": "add a feature", "response": "done", "toolCalls": 0, "endSource": "stop" }
+    ],
+    "expected": null,
+    "note": "the shortest measured real instruction clears the prompt cap"
+  },
+  {
+    "turns": [
+      { "prompt": "hello", "response": "ok", "toolCalls": 1, "endSource": "stop" }
+    ],
+    "expected": null,
+    "note": "even a short exchange is work when it used a tool"
+  },
+  {
+    "turns": [
+      { "prompt": "produce the artifact", "response": "leftover text", "toolCalls": 0, "endSource": "stop", "efficiencyJson": "{\"response_kind\":\"tool_only\"}" }
+    ],
+    "expected": "no_reply",
+    "note": "the collector response-kind tag outranks leftover raw text"
+  },
+  {
+    "turns": [
+      { "prompt": "12345678901😀", "response": "ok", "toolCalls": 0, "endSource": "stop" }
+    ],
+    "expected": null,
+    "note": "length parity uses JavaScript UTF-16 code units"
+  }
+]

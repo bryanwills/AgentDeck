@@ -52,7 +52,7 @@
     "postinstall": "node scripts/postinstall.mjs"
   },
   "engines": {
-    "node": ">=22.0.0",
+    "node": "22.x || 24.x || 26.x",
     "pnpm": ">=11.5.0 <12"
   },
   "devDependencies": {

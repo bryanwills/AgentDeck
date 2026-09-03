@@ -310,16 +310,16 @@ actor ApmeRunner {
         let turns = store.listTurnsForTask(taskId)
         if turns.isEmpty { return }
 
-        // Skip tasks whose turns carry no meaningful text — all tool_only /
-        // empty. Judging silence produces noise scores. Parity with TS runner.
-        let anyText = turns.contains { t in
-            let kind = Self.readResponseKind(turn: t)
-            if kind == "text" { return true }
-            let prompt = (t["prompt"] as? String) ?? ""
-            return !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        if !anyText {
-            DaemonLogger.shared.debug("APME", "runTaskEval skip task=\(taskId.prefix(8)) — no text")
+        // A verdict about the agent's work needs the agent's work. This is the
+        // generated Swift mirror of bridge/src/apme/task-gradeability.ts: it
+        // rejects silence, abort notices, and trivial greetings while keeping
+        // replyless headless/workflow tasks with a real tool/file trajectory.
+        if let reason = TaskGradeabilityRules.notGradeableReason(turns) {
+            store.updateTask(id: taskId, fields: [
+                "notesJson": TaskGradeabilityRules.notGradeableNotes(reason) as Any?
+            ])
+            DaemonLogger.shared.debug(
+                "APME", "runTaskEval declined task=\(taskId.prefix(8)) — \(reason)")
             return
         }
 
@@ -335,7 +335,8 @@ actor ApmeRunner {
             rubricPrompt: rubricPrompt,
             category: category ?? task.taskCategory ?? "unknown",
             boundarySignal: boundarySignal ?? task.boundarySignal,
-            turns: turns
+            turns: turns,
+            sample: store.getSampleDict(taskId)
         )
 
         guard let judgeOutput = await callJudge(prompt: judgePrompt) else {
@@ -638,7 +639,8 @@ actor ApmeRunner {
         rubricPrompt: String,
         category: String,
         boundarySignal: String,
-        turns: [[String: Any]]
+        turns: [[String: Any]],
+        sample: [String: Any]? = nil
     ) -> String {
         let cap = 10
         let clipped = Array(turns.prefix(cap))
@@ -654,6 +656,17 @@ actor ApmeRunner {
             lines.append("… (\(turns.count - cap) more turns omitted)")
         }
 
+        let trajectoryLines = sample.map { buildTrajectoryLines(sample: $0) } ?? []
+        var costLine: String? = nil
+        if let cost = sample?["cost"] as? [String: Any],
+           let model = sample?["model"] as? [String: Any] {
+            let input = cost["inputTokens"] as? Int ?? 0
+            let output = cost["outputTokens"] as? Int ?? 0
+            let usd = cost["costUsd"] as? Double ?? 0
+            let modelId = model["modelId"] as? String ?? "unknown"
+            costLine = String(format: "cost: %din/%dout tok, $%.4f, model %@", input, output, usd, modelId)
+        }
+
         var sections: [String] = [
             rubricPrompt,
             "",
@@ -661,13 +674,70 @@ actor ApmeRunner {
             "task_category: \(category)",
             "turn_count: \(turns.count)",
             "boundary_signal: \(boundarySignal)",
-            "",
-            "--- TURNS ---",
         ]
+        if let costLine { sections.append(costLine) }
+        sections.append("")
+        sections.append("--- TURNS ---")
         sections.append(contentsOf: lines)
+        if !trajectoryLines.isEmpty {
+            sections.append("")
+            sections.append("--- TASK TRAJECTORY ---")
+            sections.append(contentsOf: trajectoryLines)
+        }
         sections.append("")
         sections.append("Respond with strict JSON only.")
         return sections.joined(separator: "\n")
+    }
+
+    /// Compact typed SessionSample evidence for the task judge. In particular,
+    /// child-agent lifecycle rows make delegated work visible even though child
+    /// hooks never enter the parent's ordinary state machine.
+    static func buildTrajectoryLines(sample: [String: Any], cap: Int = 30) -> [String] {
+        guard let allEvents = sample["events"] as? [[String: Any]] else { return [] }
+        var lines: [String] = []
+        for event in allEvents.prefix(cap) {
+            switch event["kind"] as? String {
+            case "tool":
+                let name = event["name"] as? String ?? "tool"
+                var input = ""
+                if let value = event["input"],
+                   let data = try? JSONSerialization.data(
+                    withJSONObject: value, options: [.fragmentsAllowed]),
+                   let string = String(data: data, encoding: .utf8) {
+                    input = String(string.prefix(120))
+                }
+                let status = (event["status"] as? String).map { " → \($0)" } ?? ""
+                let error = (event["error"] as? String).map { " [err: \(String($0.prefix(80)))]" } ?? ""
+                lines.append("  tool \(name)(\(input))\(status)\(error)")
+            case "model":
+                let model = event["model"] as? String ?? "unknown"
+                let input = event["inputTokens"] as? Int ?? 0
+                let output = event["outputTokens"] as? Int ?? 0
+                let usd = event["costUsd"] as? Double ?? 0
+                let cost = usd == 0 ? "" : String(format: " ($%.4f)", usd)
+                lines.append("  model \(model): \(input)in/\(output)out tok\(cost)")
+            case "subagent":
+                let name = event["name"] as? String ?? "Subagent"
+                let phase = event["phase"] as? String ?? "completed"
+                let duration: String
+                if let ms = event["durationMs"] as? Int {
+                    duration = " (\(Int((Double(ms) / 1000).rounded()))s)"
+                } else {
+                    duration = ""
+                }
+                let summary = (event["summary"] as? String)
+                    .map { ": \(String($0.prefix(160)))" } ?? ""
+                lines.append("  subagent \(name) → \(phase)\(duration)\(summary)")
+            case "state":
+                lines.append("  state → \(event["to"] as? String ?? "unknown")")
+            default:
+                break
+            }
+        }
+        if allEvents.count > cap {
+            lines.append("  … (\(allEvents.count - cap) more events)")
+        }
+        return lines
     }
 
     static func buildTurnJudgePrompt(
