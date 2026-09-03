@@ -160,6 +160,52 @@ end_source
 
 턴은 `UserPromptSubmit`/`chat_start`/`user_prompt` 이벤트마다 생성되고, 응답 캡처 시 `response` 채워짐. **닫히는 시점은 Stop** (`collector.noteTurnStop()`) — 다음 프롬프트가 아니다. 이전에는 `ended_at` 이 다음 프롬프트 시각이었으므로 턴 길이에 사용자가 다음 지시를 타이핑한 시간이 통째로 섞였고(실측: 5h 턴 = 대부분 유휴), duration 파생 효율 지표가 전부 오염돼 있었다.
 
+#### 판정 대상 선별 — 에이전트의 작업이 없으면 판정도 없다 (2026-09-03)
+
+task rollup judge 는 텍스트가 있으면 무엇이든 채점했고, 그 "텍스트"에 사용자 프롬프트가
+포함됐다. 실측(한 주): 채점된 182건 중 **69건은 에이전트 응답이 하나도 없었고**(평균
+0.59 로 scorecard 에 진짜 작업 옆에 섰다), 사용량 한도 abort 한 건은 abort 안내문을
+읽고 "세션 한도로 실패" 0%, `hello` 는 "planning 실패" 0% — 셋 다 Work 판 attention
+정렬 맨 위에 떴다. 규칙은 `bridge/src/apme/task-gradeability.ts` **한 곳**(runner 와
+reaper 의 enqueue 게이트가 같이 읽는다): `no_reply`(에이전트 응답 없음) ·
+`aborted_only`(모든 턴이 클라이언트 종료 — 한도/인증/API, "응답"은 안내문) ·
+`trivial`(툴 없는 단일 교환, 프롬프트 ≤12자·응답 ≤200자 — 인사말). 거부된 task 는
+`notes_json={"notGradeable":…}` 로 이유가 찍히고 Work 판이 `not graded · no reply
+captured` 처럼 그대로 말한다 — 조용히 건너뛰면 "unjudged" 가 백로그로 읽힌다.
+
+**응답 소스는 에이전트별로 정한다** (`bridge/src/hook-response-source.ts`, 순수함수).
+인라인 텍스트(`last_assistant_message` …)가 있으면 그것, 없으면 Claude transcript 는
+Claude 리더, Codex rollout 은 Codex 리더. 이전 규칙은 "`transcript_path` 가 있으면 Claude
+리더" 였는데 Codex 훅도 `transcript_path` 를 싣는다 — 자기 rollout 경로다 — 그래서 한 주의
+codex stop 턴 128건 중 **3건**만 응답을 가졌고 나머지 task 는 침묵을 채점받았다. 같은
+페이로드에 `model` 도 실려 있어 codex run/turn 의 model_id 는 전부 NULL 이었다; 이제
+Codex 는 훅의 `model`, Claude 는 transcript(단 `<synthetic>` — 클라이언트 abort 안내문의
+모델명 — 은 제외)에서 읽고, `collector.updateModel` 이 run 뿐 아니라 **turn** 에 찍는다
+(`turns.model_id` 가 scorecard 의 원천인데 훅 관측 턴 648건이 전부 NULL 이었다). 과거
+codex 턴 732건은 rollout 전체 스캔으로 응답을 1회 복원했다(`efficiency_json.
+response_source=rollout_backfill_2026-09-03`).
+
+**Stop 시 빈 transcript 읽기는 답이 아니다.** Claude Code 는 마지막 assistant 레코드를 쓰는
+도중에 Stop 훅을 돌린다 — 실측: Stop 21:20:22Z, 1,638자 응답 레코드 21:20:22.395Z. 한 주
+Claude stop 턴 344건 중 113건이 그렇게 응답 없이 보관됐다. `deferred-reply-read.ts` 가
+1.5s·6s 두 번 다시 읽어 `setLastClosedTurnResponse`(기존 응답은 덮지 않음)로 넘긴다.
+과거 30일의 Claude 턴 396건은 transcript 전체 스캔(턴 창 안의 마지막 assistant text)으로
+1회 복원했다(`response_source=transcript_backfill_2026-09-03`).
+
+**근거 없이 내려진 판정은 시작 시 철회된다** (`retractUngradeableVerdicts`, 30일 창,
+멱등): 규칙이 지금 거부할 task 의 judge/scorer 행을 지우고 요약·점수·outcome 을 비운 뒤
+`notGradeable` 을 찍는다(수동 `abandoned` 는 사용자의 진술이라 보존). 반대로 규칙이
+느슨해져 다시 판정 가능해진 task 는 stamp 를 지워 백로그로 돌려보낸다 — 첫 규칙은
+"응답 없음=거부" 였고 헤드리스/워크플로 에이전트(마지막이 Write 나 Bash, 맺음말 없음)
+67건의 타당한 판정을 철회했다가, 툴 궤적(호출 ≥3 또는 파일 기록)을 작업 증거로 인정한 뒤
+64건이 재입장했다.
+
+**judge 백로그는 데몬 틱이 배출한다.** task 의 judge 호출은 collector 의 close 경로에서
+한 번 발화하므로 재시작 중·judge 오프라인·probe 미완이면 영영 잃었다 — closed 미채점
+1,060건. `listTasksNeedingSummary` 는 호출자가 없었다. 이제 틱 1b 가 judge probe 가
+`ready` 일 때만 3건씩, 30일 창 안에서, 거부된 task 를 제외하고 enqueue 하며, runner 는
+프로세스당 task 별 실패 2회 후 다시 올리지 않는다.
+
 #### end_source — Stop hook 유실률 상시 계측
 
 Claude 턴을 닫는 권한은 Stop hook **하나뿐**이고 그 전달은 fire-and-forget 이라 보장되지 않는다. 문제는 유실이 구조적으로 안 보인다는 점이다 — Stop 이 유실된 턴은 "다음 프롬프트에 닫힌 턴"과 행 모양이 똑같다. `end_source` 는 **어느 신호가 그 턴을 닫았는지**를 기록해 유실을 일화가 아닌 비율로 만든다:
@@ -172,7 +218,8 @@ Claude 턴을 닫는 권한은 Stop hook **하나뿐**이고 그 전달은 fire-
 | `interrupted` | 사용자가 ESC 로 취소 — Claude Code 는 취소 시 hook 을 **하나도 emit 하지 않으므로** 애초에 올 Stop 이 없었다. 유실이 아니다 |
 | `aborted` | **클라이언트가** 턴을 끝냄 — 사용량 한도(`You've hit your session limit`), 인증 만료(`Please run /login`), 크레딧 소진, API 429/529. assistant 레코드 하나에 `stop_reason: "stop_sequence"` 로 기록되고 Stop hook 은 발화하지 않는다. 취소와 같은 이유로 유실이 아니다 |
 | `superseded` | 이 프롬프트의 턴이 **돌기도 전에** 다음 프롬프트가 도착 — 큐잉된 메시지와 `<task-notification>` 주입은 ~130ms 간격 쌍으로 들어오고, 모델 턴 하나가 둘을 처리하며 Stop 도 하나만 빚진다(마지막 것에 대해). 밀려난 행은 "프롬프트당 턴 1개" 계수 방식의 산물이지 유실이 아니다 |
-| `session_end` / `run_close` / `clear` | 턴이 열린 채로 세션·run 이 끝나거나 `/clear` 로 잘림 |
+| `session_end` / `clear` | 턴이 열린 채로 세션이 끝나거나 `/clear` 로 잘림 |
+| `run_close` | 열린 턴 밑에서 abandoned-run reaper 가 run 을 닫음. 실측(2026-09-03, 5.5일): 52건 중 45건이 턴 시작과 다음 턴 사이에 **데몬 재시작**을 끼고 있었다 — 에이전트가 Stop 을 잃은 게 아니라 받을 프로세스가 없었다. `stop-health` 의 `Reaped` 열로 따로 세고, 비율에는 넣지 않는다(세션 종료로 접어 세던 시절 codex 유실 29% 가 11% 로 읽혔다) |
 | `NULL` | 아직 열려 있음(`ended_at IS NULL`), 또는 컬럼 도입 이전 행 |
 
 컬럼 도입 이전 행은 **backfill 하지 않는다**. 당시엔 전부 다음 프롬프트에 닫혔으므로 Stop 도착 여부를 구분할 근거가 없고, 추측 backfill 은 이 컬럼이 재려는 바로 그 비율을 오염시킨다. `stop-health` 는 그 행들을 `?` 로 따로 센다.
@@ -191,7 +238,7 @@ Claude 턴을 닫는 권한은 Stop hook **하나뿐**이고 그 전달은 fire-
 agentdeck apme stop-health --since 7d [--agent claude-code]
 ```
 
-분모는 **판정 가능한 턴만** — `stop + synthetic_stop + next_prompt`. 열린 턴·취소된 턴·중단된 턴·밀려난 턴·세션 종료로 닫힌 턴·도입 이전 행은 Stop 도착 여부의 증거가 아니므로 비율에서 제외한다. 어느 버킷이 분자·분모에 들어가는지는 `stopDeliveryLoss()`(`@agentdeck/shared`) 한 곳에만 있다 — 소비자가 그 규칙을 다시 적으면 범례가 주장하는 것과 다른 값을 재게 된다. 다만 `total` 에는 열린 턴이 포함되는데, 열린 턴이야말로 "아직 안 온 Stop" 이라 분모에서 빼면 측정하려는 실패를 숨기게 되기 때문이다.
+분모는 **판정 가능한 턴만** — `stop + synthetic_stop + next_prompt`. 열린 턴·취소된 턴·중단된 턴·밀려난 턴·세션 종료로 닫힌 턴·reaper 가 닫은 턴(`Reaped`)·도입 이전 행은 Stop 도착 여부의 증거가 아니므로 비율에서 제외한다. 어느 버킷이 분자·분모에 들어가는지는 `stopDeliveryLoss()`(`@agentdeck/shared`) 한 곳에만 있다 — 소비자가 그 규칙을 다시 적으면 범례가 주장하는 것과 다른 값을 재게 된다. 다만 `total` 에는 열린 턴이 포함되는데, 열린 턴이야말로 "아직 안 온 Stop" 이라 분모에서 빼면 측정하려는 실패를 숨기게 되기 때문이다.
 
 ### steps — 훅 이벤트 + tool 호출 기록
 
@@ -278,7 +325,9 @@ v_category_scorecard    -- (task_category, model_id) 그룹: runs, avg_overall,
   2. 10초 이상 닫힌 run의 outcome 계산
   3. `task_category IS NULL` 재분류 (세션 프로세스 조기 종료 복구)
   4. orphan run 태깅 — `task_prompt` 도 turn 도 없는 **빈 껍데기**만 대상
-  5. **abandoned run 수확** — 4번이 볼 수 없는 것들. 데몬이 재시작하면 in-memory `sessionToRun` 맵이 사라져 진행 중이던 run 이 영원히 `ended_at IS NULL` 로 남는다. 이들은 실제 프롬프트·턴·툴 궤적을 갖고 있어 4번의 빈-껍데기 술어를 통과하지 못하고, **task 도 닫히지 않으므로 평가가 아예 돌지 않는다** (실측: open task 65 vs closed 9). 마지막 활동 시각 기준 2시간 무활동(`AGENTDECK_APME_ABANDON_SEC`)이면 turn/task/run 을 **그 마지막 활동 시각으로** 닫고(`boundary_signal='orphaned'`), 응답 텍스트가 있는 task 만 judge 에 enqueue 한다. `collector.isLiveRun()` 으로 자기 프로세스가 아직 쥐고 있는 run 은 건너뛴다
+  5. **abandoned run 수확** — 4번이 볼 수 없는 것들. 이들은 실제 프롬프트·턴·툴 궤적을 갖고 있어 4번의 빈-껍데기 술어를 통과하지 못하고, **task 도 닫히지 않으므로 평가가 아예 돌지 않는다** (실측: open task 65 vs closed 9). 마지막 활동 시각 기준 2시간 무활동(`AGENTDECK_APME_ABANDON_SEC`)이면 turn/task/run 을 **그 마지막 활동 시각으로** 닫고, 응답 텍스트가 있는 task 만 judge 에 enqueue 한다. `collector.isLiveRun()` 으로 자기 프로세스가 아직 쥐고 있는 run 은 건너뛴다. **task 의 boundary 는 reaper 가 무엇을 발견했는지를 말한다** (2026-09-03): 모든 턴이 닫혀 있던 task 는 깨끗이 끝난 뒤 조용해진 것이므로 `idle_gap`(타이머가 프로세스와 함께 죽어 늦게 도달했을 뿐 같은 경계), **열린 턴을 쥔 task 만 `orphaned`** 이고 그 턴은 `run_close` 로 닫힌다. 전부 `orphaned` 로 찍던 시절 한 주의 task 79% 가 "reaper" 칩에 들어갔고, 그중 대부분은 세그먼테이션이 옳았던 경우였다. 양 데몬 미러(`ApmeStore.reapAbandonedRun`), 분류는 턴 UPDATE **이전**에 — 턴을 닫는 순간 구분이 사라진다.
+
+  **재시작은 더 이상 이 경로를 먹이지 않는다.** 데몬이 시작하면 첫 훅을 받기 전에 `collector.rehydrateOpenRuns()` 가 store 의 open run 을 전부 다시 채택한다 — session→run 엣지, open task(턴 범위·첫 프롬프트), open turn(툴 카운터는 `sample_events` 에서 복원 — 카운터는 turn close 때만 flush 되므로 재시작을 넘긴 턴은 예외 없이 `tool_calls=0` 으로 닫히고 있었다), 그리고 마지막 턴이 닫힌 세션엔 **남은 만큼**의 idle-gap 타이머(다운타임 중 이미 지났으면 0 → 다음 틱에 `idle_gap`). codex 의 열린 턴은 rollout 에 한 번 물어본다: 턴보다 새로운 `task_complete` 는 이 데몬이 못 받은 Stop 이므로 `synthetic_stop` 으로 닫고 응답을 싣는다(`codexTurnCompletionSince`). 실측 근거: 머지 후 5.5일간 reaper 가 닫은 task 68건 중 60건이 재시작을 끼고 있었고(개발 머신, 5일간 재시작 40회), 갓 추가된 idle-gap 경계는 그중 어느 것도 닫을 수 없었다 — 타이머가 죽은 프로세스 안에 있었으니까. 데몬 전용이다: 세션 브리지가 데몬의 run 을 채택하면 훔치는 것이 된다. Claude 의 열린 턴은 transcript 경로가 run 에 저장되지 않아 시작 시점엔 검사하지 않고, 세션의 다음 훅에서 재구성되는 관측 워치독에 맡긴다. Swift 데몬은 아직 재수화하지 않는다(reaper 의 정직한 boundary 만 미러).
 - `apme.runner.onResult()` 리스너: 평가 완료마다 `apme_eval` WS 브로드캐스트 + `BridgeTimeline.addEntry({ type: 'eval_result' })`
 
 ## Task classification
