@@ -1,6 +1,7 @@
 #if defined(BOARD_T_EMBED)
 
 #include "knob_ui.h"
+#include "attention_tracker.h"
 #include "../../state/agent_state.h"
 #include "../../net/ws_client.h"
 #include "../../net/wifi_manager.h"
@@ -70,6 +71,14 @@ static int s_listIdx = 0;
 // live — that is also what push-to-talk targets, so an idle knob defaults its
 // mic to conversation, not to whichever repo session happens to sort first.
 static bool s_userNavigated = false;
+// A durable per-session awaiting latch. Unlike a previous-frame set, this is
+// intentionally retained while a session is absent during a transport gap.
+static KnobAttention::Tracker s_attentionTracker;
+static bool s_attentionChimePending = false;
+// The exact session that most recently raised the pager. Keep its identity,
+// not just its current carousel index: daemon roster reordering must not put
+// OpenClaw back in the center while that session is still awaiting input.
+static char s_activeAttentionSessionId[32] = {0};
 static int s_menuIdx = 0;
 static int s_menuScroll = 0;
 static MenuItem s_menu[MENU_MAX];
@@ -784,6 +793,10 @@ void onRotate(int detents) {
     if (s_mode == Mode::LIST) {
         if (count == 0) return;
         s_userNavigated = true;   // an explicit pick — stop auto-defaulting
+        // Turning the knob is an explicit dismissal of automatic attention
+        // focus. The tracker remains latched, so this unresolved request does
+        // not chime again merely because it is still in the roster.
+        s_activeAttentionSessionId[0] = '\0';
         s_listIdx = (s_listIdx + detents) % (int)count;
         if (s_listIdx < 0) s_listIdx += count;
     } else {
@@ -910,16 +923,46 @@ int selectedSessionIdx() {
     return s_listIdx < count ? s_listIdx : -1;
 }
 
+bool consumeAttentionChime() {
+    const bool pending = s_attentionChimePending;
+    s_attentionChimePending = false;
+    return pending;
+}
+
 void update(float dt) {
     (void)dt;
     uint32_t now = millis();
 
+    bool attentionDetected = false;
     lockState();
     bool connected = g_state.wsConnected;
     uint8_t count = g_state.sessionCount;
     char sharedFocus[32];
     strncpy(sharedFocus, g_state.focusedSessionId, sizeof(sharedFocus) - 1);
     sharedFocus[sizeof(sharedFocus) - 1] = '\0';
+    // Observe real per-session state while holding the same lock as the roster
+    // snapshot. Missing sessions are deliberately not fed to the tracker: a
+    // transient empty roster or transport reconnect is not a resolution.
+    if (connected) {
+        for (uint8_t i = 0; i < g_state.sessionCount; i++) {
+            const SessionInfo& session = g_state.sessions[i];
+            if (s_attentionTracker.observe(session.id, session.state, now)) {
+                s_attentionChimePending = true;
+                // One chime coalesces a same-frame burst. Point at the first
+                // session that needs the user; every other awaiting LED still
+                // pulses and will be reachable by rotation.
+                if (!attentionDetected) {
+                    strncpy(s_activeAttentionSessionId, session.id,
+                            sizeof(s_activeAttentionSessionId) - 1);
+                    s_activeAttentionSessionId[sizeof(s_activeAttentionSessionId) - 1] = '\0';
+                    // This is automatic pager focus, not a lasting user choice.
+                    // Once it resolves the carousel may rest on OpenClaw again.
+                    s_userNavigated = false;
+                }
+                attentionDetected = true;
+            }
+        }
+    }
     unlockState();
 
     if (count > 0 && s_listIdx >= count) s_listIdx = count - 1;
@@ -943,7 +986,10 @@ void update(float dt) {
         // No pick yet from either the encoder or a daemon focus: rest the
         // carousel on a general assistant session when one is live, so the
         // default mic target is conversation (see s_userNavigated).
-        if (!s_userNavigated && count > 0) {
+        SessionSnap selected;
+        const bool selectedAwaiting = snapshotSession(s_listIdx, selected) &&
+            strstr(selected.state, "awaiting") != nullptr;
+        if (!s_userNavigated && !selectedAwaiting && count > 0) {
             lockState();
             for (uint8_t i = 0; i < g_state.sessionCount; i++) {
                 const SessionInfo& si = g_state.sessions[i];
@@ -954,6 +1000,40 @@ void update(float dt) {
                 }
             }
             unlockState();
+        }
+
+        // Pager attention outranks the conversational OpenClaw default and a
+        // stale shared focus. This runs last so the card visible with the chime
+        // is the session whose state actually entered awaiting. It is not a
+        // user navigation: after resolution the idle default may return to the
+        // general assistant unless the operator has rotated explicitly.
+        if (s_activeAttentionSessionId[0]) {
+            int attentionIdx = findSessionById(s_activeAttentionSessionId);
+            SessionSnap attention;
+            if (attentionIdx >= 0 && snapshotSession(attentionIdx, attention)) {
+                if (strstr(attention.state, "awaiting") != nullptr) {
+                    s_listIdx = attentionIdx;
+                } else {
+                    // An observed resolved state ends automatic focus and also
+                    // rearms the tracker for a future request from this ID.
+                    s_activeAttentionSessionId[0] = '\0';
+                }
+            }
+        }
+    }
+
+    // Do not steal an option cursor or history scrub already in progress. The
+    // chime still names a different pending session in the footer; returning to
+    // list applies and retains the queued attention selection above.
+    if (attentionDetected && s_mode != Mode::LIST && s_activeAttentionSessionId[0]) {
+        int attentionIdx = findSessionById(s_activeAttentionSessionId);
+        SessionSnap attention;
+        if (attentionIdx >= 0 && snapshotSession(attentionIdx, attention)) {
+            char notice[80];
+            snprintf(notice, sizeof(notice), "%s · %s needs you",
+                     attention.projectName[0] ? attention.projectName : "session",
+                     agentShortLabel(attention.agentType));
+            flash(notice);
         }
     }
 

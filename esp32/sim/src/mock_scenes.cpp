@@ -320,10 +320,26 @@ bool SimScenes::apply(const char* name) {
     g_state.state = AgentState::AWAITING_PERMISSION;
     return true;
   }
+  if (std::strcmp(name, "attention") == 0) {
+    // Regression: the conversation-first default used to leave this idle
+    // OpenClaw card centered while a hidden Claude session triggered the pager
+    // chime. The knob must center the exact newly-awaiting session instead.
+    base(CreatureState::ASKING);
+    addSession("openclaw", "idle", "OpenClaw");
+    addSession("claude-code", "awaiting_option", "epoch-of-tech");
+    setStr(g_state.sessions[1].question, sizeof(g_state.sessions[1].question),
+           "월간 계획 기준선을 어떻게 조정할까요?");
+    g_state.sessions[1].optionCount = 2;
+    setStr(g_state.sessions[1].options[0].label,
+           sizeof(g_state.sessions[1].options[0].label), "기준선 완화");
+    setStr(g_state.sessions[1].options[1].label,
+           sizeof(g_state.sessions[1].options[1].label), "변경 되돌리기");
+    return true;
+  }
   return false;
 }
 
 const char* SimScenes::catalog() {
-  return "empty, idle, display-off, working, multi, crowd, crowded, dense, permission, "
+  return "empty, idle, display-off, working, multi, crowd, crowded, dense, permission, attention, "
          "demo:<agent>:<state>";
 }

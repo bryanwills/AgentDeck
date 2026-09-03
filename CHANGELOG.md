@@ -38,6 +38,25 @@ file's own rule forbids reconstructing its notes. The commit above is the
 record. `npm 1.0.16` (`37c674b8`) is a different case and needs nothing — it was
 bumped, superseded by 1.0.17, and never published, so it exists only in git.
 
+## 2026-09-04 — ESP32 1.2.1
+
+### A pager chime now points at the session that needs you
+
+The T-Embed CC1101 could play its deliberate two-note attention chime for a
+Claude or Codex session while keeping the idle OpenClaw card in the center.
+Audio and display had separate waiting detectors: the first watched every
+session, while the second preferred the conversational assistant until the
+operator turned the knob. The carousel now centers the exact session that
+entered a response wait and follows its ID across roster reordering. It keeps
+an in-progress detail/history cursor intact and names the other waiting session
+in the footer instead.
+
+The same waiting request also no longer becomes a new alert when USB or WiFi
+briefly drops the roster. A fixed-size per-session latch survives empty roster
+frames and rearms only after that session is explicitly observed outside an
+awaiting state. Repeated broadcasts therefore stay silent; a genuinely new
+question still rings once.
+
 ## 2026-09-02 — Ulanzi 1.2.0
 
 Version note: Ulanzi jumps from 1.0.5 to 1.2.0 to rejoin the round's shared

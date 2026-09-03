@@ -15,6 +15,7 @@
 //                 sim --all [--outdir DIR] [--scale N]
 #include "sim.h"
 #include "config.h"
+#include "state/agent_state.h"
 
 #include <Arduino.h>
 #include <cstdio>
@@ -33,7 +34,7 @@ bool flag(int argc, char** argv, const char* key) {
     if (std::strcmp(argv[i], key) == 0) return true;
   return false;
 }
-const char* SCENES[] = {"empty", "offline", "idle", "display-off", "working", "multi", "crowd", "dense", "permission", "decision"};
+const char* SCENES[] = {"empty", "offline", "idle", "display-off", "working", "multi", "crowd", "dense", "permission", "attention", "decision"};
 }  // namespace
 
 #if defined(BOARD_LED8X32)
@@ -145,6 +146,28 @@ bool renderScene(const char* scene, const char* path, int frames, const char* pa
     treeUpdate(FRAME_DT);
     SimDisplay::refresh();
   }
+#if defined(BOARD_T_EMBED)
+  if (std::strcmp(scene, "attention") == 0 && Knob::selectedSessionIdx() != 1) {
+    std::fprintf(stderr, "[sim] attention regression: selected=%d, expected awaiting session 1\n",
+                 Knob::selectedSessionIdx());
+    return false;
+  }
+  if (std::strcmp(scene, "attention") == 0) {
+    // The daemon's roster is not a stable array. Automatic pager focus must
+    // follow the awaiting session ID when its index changes, instead of
+    // falling back to the idle OpenClaw card now occupying the old index.
+    SessionInfo swap = g_state.sessions[0];
+    g_state.sessions[0] = g_state.sessions[1];
+    g_state.sessions[1] = swap;
+    Knob::update(FRAME_DT);
+    if (Knob::selectedSessionIdx() != 0) {
+      std::fprintf(stderr,
+                   "[sim] attention reorder regression: selected=%d, expected awaiting session 0\n",
+                   Knob::selectedSessionIdx());
+      return false;
+    }
+  }
+#endif
   bool ok = SimPng::writeRgb565(path, SimDisplay::framebuffer(),
                                 SimDisplay::width(), SimDisplay::height());
   std::fprintf(stderr, "[sim] %-11s → %s (%dx%d, %d frames) %s\n",

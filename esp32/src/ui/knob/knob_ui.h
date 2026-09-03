@@ -55,4 +55,9 @@ const char* focusedSessionId();
 // -1 when there are no sessions. Drives the ring highlight.
 int selectedSessionIdx();
 
+// True once when a newly awaiting session was observed. At list level the
+// carousel follows that exact session; inside detail/history, the current
+// cursor is preserved and a footer notice names the waiting work instead.
+bool consumeAttentionChime();
+
 }  // namespace Knob

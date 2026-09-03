@@ -609,46 +609,17 @@ static void uiTask(void* param) {
             }
         }
 
-        // Awaiting edge: alert per session, not on the aggregate boolean. With
-        // the old anyAwaiting edge, session B could start waiting while A was
-        // already waiting and the pager stayed silent.
+        // Aggregate awaiting drives only power policy. Per-session edge
+        // detection lives with the knob carousel so the audible alert and the
+        // visible session cannot disagree (and reconnects cannot re-arm it).
         bool anyAwaiting = false;
-        char awaitingIds[10][32] = {};
-        uint8_t awaitingCount = 0;
         lockState();
         for (uint8_t i = 0; i < g_state.sessionCount; i++) {
             if (strstr(g_state.sessions[i].state, "awaiting") != nullptr) {
                 anyAwaiting = true;
-                if (awaitingCount < 10) {
-                    strncpy(awaitingIds[awaitingCount], g_state.sessions[i].id,
-                            sizeof(awaitingIds[awaitingCount]) - 1);
-                    awaitingCount++;
-                }
             }
         }
-        bool connectedNow = g_state.wsConnected;
         unlockState();
-        {
-            static char prevAwaitingIds[10][32] = {};
-            static uint8_t prevAwaitingCount = 0;
-            bool newlyAwaiting = false;
-            for (uint8_t i = 0; i < awaitingCount && !newlyAwaiting; i++) {
-                bool seen = false;
-                for (uint8_t j = 0; j < prevAwaitingCount; j++) {
-                    if (strcmp(awaitingIds[i], prevAwaitingIds[j]) == 0) {
-                        seen = true;
-                        break;
-                    }
-                }
-                newlyAwaiting = !seen;
-            }
-            if (newlyAwaiting && connectedNow) {
-                Chime::playAttention();
-                s_lastInputMs = now;  // wake the panel with the chime
-            }
-            memcpy(prevAwaitingIds, awaitingIds, sizeof(prevAwaitingIds));
-            prevAwaitingCount = awaitingCount;
-        }
 
         // Hold-to-talk on the ENCODER, not a side key: the CC1101 board has
         // no user-pressable button besides the encoder and RST, so the vendor
@@ -694,6 +665,10 @@ static void uiTask(void* param) {
         knobApplyPower(now, anyAwaiting, &ringDark);
 
         Knob::update(dt);
+        if (Knob::consumeAttentionChime()) {
+            Chime::playAttention();
+            s_lastInputMs = now;  // wake the panel with the matching card
+        }
         Ring::update(now, Knob::selectedSessionIdx(), connected, ringDark);
 
         // These views rebuild only on visible state changes, but rotary input can
