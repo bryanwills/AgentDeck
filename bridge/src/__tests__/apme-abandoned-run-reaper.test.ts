@@ -82,7 +82,7 @@ describe('abandoned APME run reaper', () => {
     const lastActivity = seedAbandoned(store, 'run-x', 3 * HOUR);
 
     const closed = store.reapAbandonedRun('run-x', lastActivity);
-    expect(closed).toEqual([{ id: 'task-run-x', category: null }]);
+    expect(closed).toEqual([{ id: 'task-run-x', category: null, boundarySignal: 'orphaned' }]);
 
     const run = store.getRun('run-x');
     expect(run?.endedAt).toBe(lastActivity);
@@ -122,5 +122,85 @@ describe('abandoned APME run reaper', () => {
     expect(collector.isLiveRun('some-other-run')).toBe(false);
     collector.closeRun('live-session');
     expect(collector.isLiveRun(runId!)).toBe(false);
+  });
+});
+
+describe('what the reaper says it found', () => {
+  let store!: ApmeStore;
+  beforeEach(async () => { store = await makeStore(); });
+  afterEach(() => { cleanup(store); });
+
+  // Before 2026-09-03 every reaped task was stamped `orphaned`, which put 79%
+  // of a week's tasks in the "reaper" chip and hid that the segmentation had
+  // been right: most of them had gone quiet after a cleanly closed turn — the
+  // idle-gap boundary, reached late because the timer died with the daemon.
+
+  it('a task whose last turn CLOSED is an idle_gap boundary, not an orphan', () => {
+    const lastActivity = seedAbandoned(store, 'run-quiet', 3 * HOUR);
+    store.updateTurn('turn-run-quiet', { endedAt: lastActivity, endSource: 'stop' });
+
+    const closed = store.reapAbandonedRun('run-quiet', lastActivity);
+    expect(closed).toEqual([{ id: 'task-run-quiet', category: null, boundarySignal: 'idle_gap' }]);
+    expect(store.getTask('task-run-quiet')!.boundarySignal).toBe('idle_gap');
+    expect(store.listTurns('run-quiet')[0]!.end_source).toBe('stop'); // untouched
+  });
+
+  it('a task still holding an OPEN turn is orphaned, and that turn is closed as run_close', () => {
+    const lastActivity = seedAbandoned(store, 'run-cut', 3 * HOUR);
+
+    const closed = store.reapAbandonedRun('run-cut', lastActivity);
+    expect(closed).toEqual([{ id: 'task-run-cut', category: null, boundarySignal: 'orphaned' }]);
+    expect(store.getTask('task-run-cut')!.boundarySignal).toBe('orphaned');
+    const [turn] = store.listTurns('run-cut');
+    expect(turn!.end_source).toBe('run_close');
+    expect(turn!.ended_at).toBe(lastActivity);
+  });
+
+  it('classifies each open task on its own turns, in one run', () => {
+    const lastActivity = seedAbandoned(store, 'run-mixed', 3 * HOUR);
+    store.updateTurn('turn-run-mixed', { endedAt: lastActivity - 1000, endSource: 'stop' });
+    store.insertTask({ id: 'task-run-mixed-2', runId: 'run-mixed', taskIndex: 1, boundarySignal: 'open', startedAt: lastActivity });
+    store.insertTurn({ id: 'turn-run-mixed-2', runId: 'run-mixed', taskId: 'task-run-mixed-2', turnIndex: 4, prompt: 'cut off', startedAt: lastActivity });
+
+    const closed = store.reapAbandonedRun('run-mixed', lastActivity);
+    expect(new Map(closed.map((c) => [c.id, c.boundarySignal]))).toEqual(new Map([
+      ['task-run-mixed', 'idle_gap'],
+      ['task-run-mixed-2', 'orphaned'],
+    ]));
+  });
+});
+
+describe('reaped tasks keep their run\'s category and old verdicts are re-read on evidence', () => {
+  let store!: ApmeStore;
+  beforeEach(async () => { store = await makeStore(); });
+  afterEach(() => { cleanup(store); });
+
+  it('a reaped task inherits the run category it never resolved in memory', () => {
+    const lastActivity = seedAbandoned(store, 'run-cat', 3 * HOUR);
+    store.updateRun('run-cat', { taskCategory: 'ops' });
+    const closed = store.reapAbandonedRun('run-cat', lastActivity);
+    expect(closed[0]!.category).toBe('ops');
+    expect(store.getTask('task-run-cat')!.taskCategory).toBe('ops');
+  });
+
+  it('reclassifyReapedTasks moves only orphaned tasks whose every turn closed with a known signal', () => {
+    // Evidence: closed normally → idle_gap.
+    const a = seedAbandoned(store, 'run-a', 3 * HOUR);
+    store.updateTurn('turn-run-a', { endedAt: a, endSource: 'stop' });
+    store.updateTask('task-run-a', { endedAt: a, boundarySignal: 'orphaned' });
+    // Cut open by the old reaper → stays orphaned.
+    const b = seedAbandoned(store, 'run-b', 3 * HOUR);
+    store.updateTurn('turn-run-b', { endedAt: b, endSource: 'run_close' });
+    store.updateTask('task-run-b', { endedAt: b, boundarySignal: 'orphaned' });
+    // Pre-column row (end_source NULL) → unknown, never guessed.
+    const c = seedAbandoned(store, 'run-c', 3 * HOUR);
+    store.updateTurn('turn-run-c', { endedAt: c });
+    store.updateTask('task-run-c', { endedAt: c, boundarySignal: 'orphaned' });
+
+    expect(store.reclassifyReapedTasks()).toBe(1);
+    expect(store.getTask('task-run-a')!.boundarySignal).toBe('idle_gap');
+    expect(store.getTask('task-run-b')!.boundarySignal).toBe('orphaned');
+    expect(store.getTask('task-run-c')!.boundarySignal).toBe('orphaned');
+    expect(store.reclassifyReapedTasks()).toBe(0); // idempotent
   });
 });

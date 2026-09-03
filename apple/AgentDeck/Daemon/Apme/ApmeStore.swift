@@ -285,17 +285,25 @@ final class ApmeStore: @unchecked Sendable {
         return result
     }
 
-    /// Finalize an abandoned run: close its dangling turns, close its tasks with
-    /// `boundary_signal='orphaned'`, then close the run — all stamped at
-    /// `endedAt` (the run's last activity), so a run abandoned last night does
-    /// not report a twelve-hour turn. The run is closed LAST: any partial
-    /// failure leaves `ended_at` NULL so the next sweep retries, instead of
-    /// stranding an open task behind a closed run where nothing would find it.
+    /// Finalize an abandoned run: close its open tasks, close its dangling
+    /// turns, then close the run — all stamped at `endedAt` (the run's last
+    /// activity), so a run abandoned last night does not report a twelve-hour
+    /// turn. The run is closed LAST: any partial failure leaves `ended_at` NULL
+    /// so the next sweep retries, instead of stranding an open task behind a
+    /// closed run where nothing would find it.
     ///
-    /// Returns the closed task ids so the caller can enqueue task-level evals —
-    /// the reason for closing them. Mirrors bridge/src/apme/store.ts.
+    /// The task's boundary says what the reaper found, not merely who found
+    /// it. A task whose every turn had closed went quiet after a clean finish
+    /// — the `idle_gap` boundary, reached late because the timer that would
+    /// have fired did not survive the process. Only a task still holding an
+    /// OPEN turn is `orphaned`. Tasks are classified BEFORE the dangling turns
+    /// are closed, since closing them erases the distinction.
+    ///
+    /// Returns the closed tasks with the boundary each was given so the caller
+    /// can enqueue task-level evals — the reason for closing them. Mirrors
+    /// bridge/src/apme/store.ts `reapAbandonedRun`.
     @discardableResult
-    func reapAbandonedRun(runId: String, endedAt: Int) -> [(id: String, category: String?)] {
+    func reapAbandonedRun(runId: String, endedAt: Int) -> [(id: String, category: String?, boundarySignal: String)] {
         guard let db else { return [] }
         var bounds: (lo: Int, hi: Int)?
         var bstmt: OpaquePointer?
@@ -307,15 +315,20 @@ final class ApmeStore: @unchecked Sendable {
         }
         sqlite3_finalize(bstmt)
 
-        var tasks: [(id: String, category: String?)] = []
+        var tasks: [(id: String, category: String?, boundarySignal: String)] = []
         var tstmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "SELECT id, task_category FROM tasks WHERE run_id = ? AND ended_at IS NULL", -1, &tstmt, nil) == SQLITE_OK {
+        if sqlite3_prepare_v2(db, """
+        SELECT k.id, k.task_category,
+               EXISTS (SELECT 1 FROM turns t WHERE t.task_id = k.id AND t.ended_at IS NULL) AS has_open_turn
+          FROM tasks k WHERE k.run_id = ? AND k.ended_at IS NULL
+        """, -1, &tstmt, nil) == SQLITE_OK {
             sqlite3_bind_text(tstmt, 1, (runId as NSString).utf8String, -1, nil)
             while sqlite3_step(tstmt) == SQLITE_ROW {
                 let id = String(cString: sqlite3_column_text(tstmt, 0))
                 let cat = sqlite3_column_type(tstmt, 1) == SQLITE_NULL
                     ? nil : String(cString: sqlite3_column_text(tstmt, 1))
-                tasks.append((id, cat))
+                let hasOpenTurn = sqlite3_column_int(tstmt, 2) != 0
+                tasks.append((id, cat, hasOpenTurn ? "orphaned" : "idle_gap"))
             }
         }
         sqlite3_finalize(tstmt)
@@ -334,13 +347,17 @@ final class ApmeStore: @unchecked Sendable {
             }
             _ = sqlite3_step(stmt)
         }
-        exec("UPDATE turns SET ended_at = ? WHERE run_id = ? AND ended_at IS NULL", [endedAt, runId])
+        // Tasks first: the open-turn test is destroyed by the turn UPDATE.
         exec("""
-        UPDATE tasks SET ended_at = ?, boundary_signal = 'orphaned',
+        UPDATE tasks SET ended_at = ?,
+          boundary_signal = CASE
+            WHEN EXISTS (SELECT 1 FROM turns t WHERE t.task_id = tasks.id AND t.ended_at IS NULL)
+              THEN 'orphaned' ELSE 'idle_gap' END,
           first_turn_index = COALESCE(first_turn_index, ?),
           last_turn_index  = COALESCE(last_turn_index, ?)
         WHERE run_id = ? AND ended_at IS NULL
         """, [endedAt, bounds?.lo, bounds?.hi, runId])
+        exec("UPDATE turns SET ended_at = ?, end_source = 'run_close' WHERE run_id = ? AND ended_at IS NULL", [endedAt, runId])
         exec("UPDATE runs SET ended_at = ? WHERE id = ? AND ended_at IS NULL", [endedAt, runId])
         return tasks
     }

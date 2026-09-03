@@ -129,7 +129,10 @@ export function readModelFromTranscript(transcriptPath: string): string | null {
     try {
       const rec = JSON.parse(line) as { message?: { role?: string; model?: string } };
       const model = rec?.message?.model;
-      if (rec?.message?.role === 'assistant' && typeof model === 'string' && model) {
+      // `<synthetic>` is what Claude Code stamps on the client-authored abort
+      // notice ("You've hit your session limit…"); it names no model, and
+      // 18 of one week's runs carried it as their identity.
+      if (rec?.message?.role === 'assistant' && typeof model === 'string' && model && !model.startsWith('<')) {
         return model;
       }
     } catch { /* skip malformed line */ }

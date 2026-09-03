@@ -12,6 +12,7 @@
  */
 
 import { spawn } from 'child_process';
+import { taskGradeability, notGradeableNotes } from './task-gradeability.js';
 import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { debug } from '../logger.js';
@@ -24,6 +25,9 @@ import type { SessionSample, TrajectoryEvent } from '@agentdeck/shared';
 import { runSampleScorers } from './scorers/index.js';
 import type { ApmeRunRow, ParsedJudge } from './types.js';
 import { execSync } from 'child_process';
+
+/** Judge attempts per task per process before the backlog drain stops offering it. */
+const TASK_EVAL_MAX_ATTEMPTS = 2;
 
 export interface EvalJob {
   runId: string;
@@ -239,13 +243,27 @@ export class ApmeRunner {
       debug('APME', `skip duplicate task eval taskId=${job.taskId}`);
       return;
     }
+    // A task whose judge call failed (unparseable verdict, backend error)
+    // leaves no row behind, so the backlog drain would offer it again every
+    // sweep. Two attempts per process; the next daemon start gets two more.
+    if ((this.taskEvalFailures.get(job.taskId) ?? 0) >= TASK_EVAL_MAX_ATTEMPTS) {
+      debug('APME', `skip task eval taskId=${job.taskId.slice(0, 8)} — ${TASK_EVAL_MAX_ATTEMPTS} failed attempts this process`);
+      return;
+    }
     this.runningTaskIds.add(job.taskId);
-    void this.runTaskEval(job).finally(() => {
+    void this.runTaskEval(job).then((ok) => {
+      if (ok === false) this.taskEvalFailures.set(job.taskId, (this.taskEvalFailures.get(job.taskId) ?? 0) + 1);
+    }).finally(() => {
       this.runningTaskIds.delete(job.taskId);
     });
   }
 
-  private async runTaskEval({ runId, taskId, category, boundarySignal }: { runId: string; taskId: string; category?: string; boundarySignal?: string }): Promise<void> {
+  /** Failed judge attempts per task, this process. See `enqueueTask`. */
+  private readonly taskEvalFailures = new Map<string, number>();
+
+  /** Resolves `false` when the judge was called and produced nothing usable
+   *  (a failed attempt worth counting); `true` or `undefined` otherwise. */
+  private async runTaskEval({ runId, taskId, category, boundarySignal }: { runId: string; taskId: string; category?: string; boundarySignal?: string }): Promise<boolean | undefined> {
     const cfg = this.configOverride ?? loadApmeConfig();
     if (!cfg.enabled) return;
     if (this.judgeOverride == null && !judgeBackendSupported(cfg.judge)) {
@@ -258,16 +276,24 @@ export class ApmeRunner {
     const turns = this.store.listTurnsForTask(taskId);
     if (turns.length === 0) return;
 
-    // Skip tasks whose turns carry no meaningful text — all tool_only/empty.
-    const anyText = turns.some((t) => {
-      const kind = readResponseKind(t);
-      if (kind === 'text') return true;
-      const prompt = typeof t.prompt === 'string' ? t.prompt.trim() : '';
-      return prompt.length > 0;
-    });
-    if (!anyText) {
-      debug('APME', `runTaskEval skip task=${taskId.slice(0, 8)} — no text`);
+    // A verdict about the agent's work needs the agent's work — see
+    // task-gradeability.ts for what that means and what it measured. A
+    // declined task is stamped with its reason so the row can say so.
+    const gradeability = taskGradeability(turns);
+    if (!gradeability.gradeable) {
+      debug('APME', `runTaskEval declined task=${taskId.slice(0, 8)} — ${gradeability.reason}`);
+      try { this.store.updateTask(taskId, { notesJson: notGradeableNotes(gradeability.reason) }); }
+      catch { /* ignore */ }
       return;
+    }
+
+    // The category the rubric keys on: the caller's, else the row's, else
+    // the run's. A reaped task used to reach here with none and fall to the
+    // generic rubric while its run had long been classified.
+    if (!category || category === 'unknown') {
+      const fromTask = task.taskCategory && task.taskCategory !== 'unknown' ? task.taskCategory : undefined;
+      const fromRun = this.store.getRun(runId)?.taskCategory;
+      category = fromTask ?? (fromRun && fromRun !== 'unknown' ? fromRun : undefined);
     }
 
     // Select rubric: task_rollup preferred, fall back to category, then general.
@@ -324,7 +350,7 @@ export class ApmeRunner {
       const parsed = parseJudgeJson(judgeResult.text);
       if (!parsed) {
         debug('APME', `runTaskEval parse failed task=${taskId.slice(0, 8)}`);
-        return;
+        return false;
       }
 
       const now = Date.now();
@@ -426,7 +452,9 @@ export class ApmeRunner {
       }
     } catch (err) {
       debug('APME', `task eval error taskId=${taskId.slice(0, 8)}: ${String(err)}`);
+      return false;
     }
+    return true;
   }
 
   private async runTurnEval({ runId, turnId, category }: { runId: string; turnId: string; category?: string }): Promise<void> {

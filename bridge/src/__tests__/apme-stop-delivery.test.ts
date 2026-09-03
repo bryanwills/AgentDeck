@@ -16,6 +16,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { ApmeStore } from '../apme/store.js';
 import { ApmeCollector } from '../apme/collector.js';
+import { stopDeliveryLoss } from '@agentdeck/shared';
 
 async function makeStore(): Promise<ApmeStore> {
   const dir = mkdtempSync(join(tmpdir(), 'apme-stop-'));
@@ -114,6 +115,20 @@ describe('turns.end_source', () => {
 
     prompt(collector, SID, 'second');
     expect(turnsOf(store, runId)[0].ended_at).toBe(closedAt);
+  });
+
+  it('a reaped turn lands in `runClose`, not `sessionEnd`, and stays out of the loss ratio', () => {
+    // Folding run_close into sessionEnd is what made a measured 29% codex
+    // loss report as 11%: the reaper closes far more turns than users do.
+    const runId = openRun();
+    prompt(collector, SID, 'straddles a restart');
+    const t = turnsOf(store, runId)[0]!;
+    store.updateTurn(t.id as string, { endedAt: Date.now(), endSource: 'run_close' });
+
+    const [row] = store.stopDelivery({ sinceMs: 0 });
+    expect(row!.runClose).toBe(1);
+    expect(row!.sessionEnd).toBe(0);
+    expect(stopDeliveryLoss(row!)).toEqual({ adjudicated: 0, lost: 0, ratio: null });
   });
 
   it('closing the run tags the open turn `session_end`, `/clear` tags it `clear`', () => {

@@ -3545,15 +3545,15 @@ apme
     if (rows.length === 0) { log(`No turns started in the last ${opts.since}.`); return; }
 
     log(`\n  Turns started in the last ${opts.since} — how each one's end was learned`);
-    log(`  ${'Agent'.padEnd(14)} ${'Turns'.padEnd(7)} ${'Stop'.padEnd(7)} ${'Synth'.padEnd(7)} ${'NoStop'.padEnd(7)} ${'Esc'.padEnd(6)} ${'Abort'.padEnd(6)} ${'Folded'.padEnd(7)} ${'SessEnd'.padEnd(8)} ${'Open'.padEnd(6)} ${'?'.padEnd(6)} Stop loss`);
-    log(`  ${'─'.repeat(14)} ${'─'.repeat(7)} ${'─'.repeat(7)} ${'─'.repeat(7)} ${'─'.repeat(7)} ${'─'.repeat(6)} ${'─'.repeat(6)} ${'─'.repeat(7)} ${'─'.repeat(8)} ${'─'.repeat(6)} ${'─'.repeat(6)} ${'─'.repeat(9)}`);
+    log(`  ${'Agent'.padEnd(14)} ${'Turns'.padEnd(7)} ${'Stop'.padEnd(7)} ${'Synth'.padEnd(7)} ${'NoStop'.padEnd(7)} ${'Esc'.padEnd(6)} ${'Abort'.padEnd(6)} ${'Folded'.padEnd(7)} ${'SessEnd'.padEnd(8)} ${'Reaped'.padEnd(7)} ${'Open'.padEnd(6)} ${'?'.padEnd(6)} Stop loss`);
+    log(`  ${'─'.repeat(14)} ${'─'.repeat(7)} ${'─'.repeat(7)} ${'─'.repeat(7)} ${'─'.repeat(7)} ${'─'.repeat(6)} ${'─'.repeat(6)} ${'─'.repeat(7)} ${'─'.repeat(8)} ${'─'.repeat(7)} ${'─'.repeat(6)} ${'─'.repeat(6)} ${'─'.repeat(9)}`);
     for (const r of rows) {
       // Which buckets the ratio may read is defined once, in shared — see
       // `stopDeliveryLoss`. Restating it here is how the instrument would come
       // to measure something other than what its legend claims.
       const { adjudicated, ratio } = stopDeliveryLoss(r);
       const rate = ratio != null ? `${(ratio * 100).toFixed(0)}% of ${adjudicated}` : '—';
-      log(`  ${r.agentType.slice(0, 14).padEnd(14)} ${String(r.total).padEnd(7)} ${String(r.stop).padEnd(7)} ${String(r.syntheticStop).padEnd(7)} ${String(r.nextPrompt).padEnd(7)} ${String(r.interrupted).padEnd(6)} ${String(r.aborted).padEnd(6)} ${String(r.superseded).padEnd(7)} ${String(r.sessionEnd).padEnd(8)} ${String(r.open).padEnd(6)} ${String(r.preInstrument).padEnd(6)} ${rate}`);
+      log(`  ${r.agentType.slice(0, 14).padEnd(14)} ${String(r.total).padEnd(7)} ${String(r.stop).padEnd(7)} ${String(r.syntheticStop).padEnd(7)} ${String(r.nextPrompt).padEnd(7)} ${String(r.interrupted).padEnd(6)} ${String(r.aborted).padEnd(6)} ${String(r.superseded).padEnd(7)} ${String(r.sessionEnd).padEnd(8)} ${String(r.runClose).padEnd(7)} ${String(r.open).padEnd(6)} ${String(r.preInstrument).padEnd(6)} ${rate}`);
     }
     log('');
     log('  Synth  = Stop hook dropped, watchdog recovered it from the transcript');
@@ -3561,6 +3561,7 @@ apme
     log('  Esc    = user cancelled the turn — Claude Code owes no Stop, so not a loss');
     log('  Abort  = usage limit / auth / API error ended the turn — no Stop is fired for those');
     log('  Folded = a second prompt arrived before this one ran; one turn served both');
+    log('  Reaped = the run was reaped under the open turn — the daemon that would have taken its Stop was gone (a restart)');
     log('  ?      = closed before end_source existed — signal unknown, never guessed');
     log('');
   });

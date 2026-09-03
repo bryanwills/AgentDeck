@@ -173,6 +173,9 @@ import { CodexOtelTracker, CODEX_OTEL_TRACES_PATH, spanNameSummary } from './cod
 import { HookCodexSessions } from './hook-codex-sessions.js';
 import { ObservedTurnWatchdogs } from './observed-turn-watchdogs.js';
 import { initApme, isTimelineProjectionEnabled, loadApmeConfig, type ApmeModule } from './apme/index.js';
+import { taskGradeability, retractUngradeableVerdicts } from './apme/task-gradeability.js';
+import { resolveStopResponse } from './hook-response-source.js';
+import { scheduleDeferredReplyRead } from './deferred-reply-read.js';
 import { FallbackTaskTimeline } from './fallback-task-timeline.js';
 import { handleApmeRequest } from './apme/http.js';
 import { readModelFromTranscript } from './apme/claude-transcript-reader.js';
@@ -187,7 +190,7 @@ import {
   DeviceVoiceReplyRouter, speakableReply, spokenDigest, pcmFromWav, type ReplySink,
 } from './device-voice-reply.js';
 import { rawSessionId, type StateSnapshot } from '@agentdeck/shared';
-import { codexTurnOutcomeFromRollout, lastAgentMessageFromCodexRollout } from './codex-rollout-response.js';
+import { codexTurnOutcomeFromRollout, codexTurnOutcomeFromRolloutPath, lastAgentMessageFromCodexRollout } from './codex-rollout-response.js';
 import { callFoundationModelsHelper } from './foundation-models-helper.js';
 import {
   initModules,
@@ -3189,8 +3192,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           // Recover it from the transcript Claude writes. Must run before
           // closeRun tears down the session→run mapping.
           if (boundary === 'stop' || boundary === 'session_end') {
+            // Codex states its model on the hook itself (`model`); Claude's
+            // transcript holds it. `transcript_path` on a Codex hook is its
+            // ROLLOUT, which the Claude reader cannot parse — so every Codex
+            // run persisted model_id=NULL while the payload said `gpt-5.6`.
+            const inlineModel = typeof json.model === 'string' ? json.model.trim() : '';
             const tp = json.transcript_path;
-            if (typeof tp === 'string' && tp) {
+            if (inlineModel) {
+              apme.collector.updateModel(hookSid, inlineModel);
+            } else if (hookAgentType === 'claude-code' && typeof tp === 'string' && tp) {
               const model = readModelFromTranscript(tp);
               if (model) apme.collector.updateModel(hookSid, model);
             }
@@ -3267,18 +3277,37 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             json.result,
           ]
             .find((v): v is string => typeof v === 'string' && v.trim().length > 0) ?? '';
-          // Codex's stop payload rarely carries the text inline; its rollout
-          // JSONL (agent_message / task_complete records) is the
-          // authoritative source — the Codex counterpart of Claude's
-          // transcript tail. Read it whenever a completion row might be
-          // emitted (open turn, or a response-only close below).
-          const rolloutOutcome = hookAgentType === 'codex-cli' && !tp && !inlineResponse
-            ? codexTurnOutcomeFromRollout(hookSid)
-            : { text: '' as string, error: undefined as string | undefined, errorKind: undefined as string | undefined };
-          const rolloutResponse = rolloutOutcome.text;
-          const responseText = tp
-            ? stripUnsafeText(lastAssistantTextFromTranscript(tp))
-            : stripUnsafeText(inlineResponse || rolloutResponse);
+          // Where the reply comes from is decided per AGENT, and inline text
+          // wins wherever it exists — it is the hook's own statement of what
+          // the agent said. Otherwise Claude's transcript is read by the
+          // Claude reader and Codex's rollout by the Codex reader. The old
+          // rule was "transcript_path ⇒ Claude reader", and a Codex hook
+          // carries a transcript_path too — its rollout — so every Codex turn
+          // read '' while `last_assistant_message` sat in the same payload
+          // (3 of 128 codex stop-turns held a response in one week, measured
+          // 2026-09-03; the judge scored the rest against silence).
+          const resolved = resolveStopResponse(
+            { agentType: hookAgentType, sessionId: hookSid, inlineResponse, transcriptPath: tp },
+            {
+              readClaudeTranscript: lastAssistantTextFromTranscript,
+              readCodexRolloutPath: codexTurnOutcomeFromRolloutPath,
+              readCodexRolloutById: codexTurnOutcomeFromRollout,
+            },
+          );
+          const rolloutOutcome = resolved.rollout;
+          const responseText = stripUnsafeText(resolved.text);
+          // An empty transcript read AT the Stop is not an answer — Claude is
+          // still writing the record the hook refers to. Re-read shortly and
+          // hand it to the last-closed turn (see deferred-reply-read.ts).
+          if (!responseText && apme && hookAgentType === 'claude-code' && tp) {
+            scheduleDeferredReplyRead(
+              () => stripUnsafeText(lastAssistantTextFromTranscript(tp)),
+              (text) => {
+                apme?.collector.setLastClosedTurnResponse(hookSid, text);
+                debug('APME', `deferred transcript read recovered ${text.length} chars for ${hookSid.slice(0, 8)}`);
+              },
+            );
+          }
           const respRaw = responseText.length > 0
             ? cleanRawText(responseText.length > 200 ? responseText.slice(0, 197) + '...' : responseText)
             : '';
@@ -4405,6 +4434,35 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       log('[agentdeck] APME timeline projection ENABLED — chat/tool rows derive from SessionSample');
     }
     log(`[agentdeck] APME enabled — store=${apme.store.dbPath} routes=/apme/*`);
+    // Re-adopt the runs the previous daemon left open BEFORE any hook is
+    // served: a session that carried on across the restart continues its run
+    // instead of stranding it for the reaper (see `rehydrateOpenRuns`).
+    // Rows the OLD reaper stamped `orphaned` on evidence that now reads
+    // `idle_gap` — one idempotent pass, evidence-gated (see the store).
+    try {
+      const reclassified = apme.store.reclassifyReapedTasks();
+      if (reclassified > 0) log(`[agentdeck] APME re-stamped ${reclassified} reaped task(s) as idle_gap — every turn had closed normally`);
+    } catch { /* store logs it */ }
+    // Verdicts the judge reached on tasks it would now decline — scored
+    // against silence, or on a usage-limit notice — are withdrawn so they
+    // stop ranking real work. Bounded to the same 30-day window the backlog
+    // drain reads; idempotent after the first pass.
+    try {
+      const r = retractUngradeableVerdicts(apme.store, Date.now() - 30 * 86_400_000);
+      const n = r.no_reply + r.aborted_only + r.trivial;
+      if (n > 0) log(`[agentdeck] APME withdrew ${n} verdict(s) reached without the agent's work — no reply ${r.no_reply}, client-ended ${r.aborted_only}, trivial ${r.trivial}`);
+      if (r.readmitted > 0) log(`[agentdeck] APME re-admitted ${r.readmitted} declined task(s) to the judge backlog — their tool trajectory is the agent's work`);
+    } catch (err) {
+      log(`[agentdeck] APME verdict retraction failed: ${String(err)}`);
+    }
+    try {
+      const r = apme.collector.rehydrateOpenRuns();
+      if (r.runs > 0) {
+        log(`[agentdeck] APME resumed ${r.runs} open run(s) from the store — ${r.tasks} task(s), ${r.turns} open turn(s), ${r.armed} idle-gap timer(s) re-armed${r.recovered > 0 ? `, ${r.recovered} codex turn(s) closed from rollout` : ''}`);
+      }
+    } catch (err) {
+      log(`[agentdeck] APME rehydrate failed: ${String(err)}`);
+    }
     // Fire-and-forget judge backend probe. Result is cached on
     // apme.runner.lastBackendProbe and surfaced on /health so users discover
     // misconfiguration (no MLX server running, missing API key, etc.) without
@@ -6477,6 +6535,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       for (const run of pending) {
         apme!.runner.enqueue({ runId: run.id, projectPath: run.projectPath ?? undefined });
       }
+      // 1b. Drain the TASK judge backlog: closed, unjudged, not declined.
+      //     A task's one judge call fires from the collector's close path, so
+      //     a daemon restart mid-eval, an offline judge, or a backend probe
+      //     not yet ready lost it for good — 1,060 closed tasks had piled up
+      //     unjudged (2026-09-03). Batched small (the judge is a local model
+      //     answering one prompt at a time) and only while the judge is
+      //     actually reachable, so an outage does not turn into a retry storm.
+      //     Bounded to 30 days: older rows predate response capture and would
+      //     mostly be declined anyway.
+      if (apme!.runner.lastBackendProbe?.status === 'ready') {
+        const backlog = apme!.store.listTasksNeedingSummary(3, Date.now() - 30 * 86_400_000);
+        for (const t of backlog) {
+          apme!.runner.enqueueTask({ runId: t.runId, taskId: t.id, ...(t.taskCategory ? { category: t.taskCategory } : {}) });
+        }
+      }
       // 2. Run outcome detection + composite scoring on recently closed runs
       // that don't have an outcome yet.
       const closedRuns = apme!.store.listRuns({ limit: 20 });
@@ -6537,24 +6610,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       //    Batched small: `enqueueTask` dispatches immediately with no
       //    concurrency cap, so a backlog is drained a few per tick rather than
       //    fired at the judge all at once.
+      //    Since `rehydrateOpenRuns` (2026-09-03) a restart no longer feeds
+      //    this path — the new daemon adopts the open runs — so what reaches
+      //    it is a run nobody resumed: a session bridge that died, or a
+      //    daemon that was down for longer than the stale window.
       const abandoned = apme!.store.listAbandonedRuns(APME_ABANDONED_RUN_STALE_SEC, 5);
       for (const run of abandoned) {
         if (apme!.collector.isLiveRun(run.id)) continue; // still owned by us
         const closedTasks = apme!.store.reapAbandonedRun(run.id, run.lastActivity);
         for (const task of closedTasks) {
-          // Judge only what there is something to judge. The backlog this
-          // reaper drains predates the response-capture fix, so most of those
-          // tasks hold prompts and tool calls but no reply — scoring them would
-          // push hundreds of "judged against silence" rows into the scorecard,
-          // the same noise `response_kind` exists to keep out. Closing the row
-          // is the data-hygiene win; the eval is a bonus when it can be earned.
-          const hasReply = apme!.store.listTurnsForTask(task.id)
-            .some((t) => typeof t.response === 'string' && t.response.trim().length > 0);
-          if (!hasReply) continue;
+          // Judge only what there is something to judge — the one rule in
+          // task-gradeability.ts, which the runner applies again and which
+          // also stamps the reason on the row. Closing the row is the
+          // data-hygiene win; the eval is a bonus when it can be earned.
+          if (!taskGradeability(apme!.store.listTurnsForTask(task.id)).gradeable) continue;
           apme!.runner.enqueueTask({
             runId: run.id, taskId: task.id,
             ...(task.category ? { category: task.category } : {}),
-            boundarySignal: 'orphaned',
+            boundarySignal: task.boundarySignal,
           });
         }
         debug('APME', `reaped abandoned run ${run.id.slice(0, 8)} — ${closedTasks.length} task(s) closed`);

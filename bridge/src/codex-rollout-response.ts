@@ -138,6 +138,17 @@ function cleanErrorText(raw: unknown): string | undefined {
 export function codexTurnOutcomeFromRollout(sessionId: string, sessionsRoot?: string): CodexTurnOutcome {
   const path = locateCodexRollout(sessionId, sessionsRoot);
   if (!path) return { text: '' };
+  return codexTurnOutcomeFromRolloutPath(path);
+}
+
+/**
+ * Same read, from a path the caller already holds. Codex's own hooks carry
+ * `transcript_path`, and for Codex that path IS the rollout — so the daemon
+ * need not locate it by id. (It used to hand that path to the CLAUDE
+ * transcript reader instead, which returned '' for every Codex turn: 3 of
+ * 128 codex stop-turns in a week held a response, measured 2026-09-03.)
+ */
+export function codexTurnOutcomeFromRolloutPath(path: string): CodexTurnOutcome {
   const lines = readTail(path, TAIL_BYTES).split('\n');
   let text = '';
   let error: string | undefined;
@@ -188,6 +199,60 @@ export function codexTurnOutcomeFromRollout(sessionId: string, sessionsRoot?: st
 
   if (!text && !error) debug('codex-rollout', `no agent_message or error in tail of ${path}`);
   return { text, error, errorKind };
+}
+
+/** What the rollout proves about a turn that opened at or after `sinceMs`. */
+export interface CodexTurnCompletion {
+  /** Rollout record timestamp of the `task_complete`, epoch ms. */
+  completedAt: number;
+  /** `last_agent_message` of that record, empty when Codex wrote none. */
+  text: string;
+}
+
+/**
+ * Did the turn that started at or after `sinceMs` COMPLETE, per the rollout?
+ *
+ * The rollout is Codex's own record of the turn, written by the process that
+ * ran it, so it can answer a question no hook can: whether a turn whose Stop
+ * never reached this daemon nevertheless finished. The daemon needs that
+ * answer exactly once — at startup, for a turn it finds still open in the
+ * store. Measured 2026-09-03: of 52 turns the reaper had closed under an open
+ * state, 45 straddled a daemon restart, and the rollouts behind them held a
+ * `task_complete` for every one; the Stop had been posted to a port nobody
+ * was listening on.
+ *
+ * Reads the tail newest-first and stops at the first record older than
+ * `sinceMs` (records carry their own ISO `timestamp`), so a completion
+ * belonging to an EARLIER turn can never be returned for this one — the same
+ * discipline as the Claude transcript probe. A `task_started` newer than the
+ * completion means a further turn opened after it; the completion still
+ * stands for the turn asked about. Never throws; null means "no evidence",
+ * which callers must not resolve as a verdict.
+ */
+export function codexTurnCompletionSince(sessionId: string, sinceMs: number, sessionsRoot?: string): CodexTurnCompletion | null {
+  const path = locateCodexRollout(sessionId, sessionsRoot);
+  if (!path) return null;
+  const lines = readTail(path, TAIL_BYTES).split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    let record: Record<string, unknown>;
+    try {
+      record = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue; // torn first line of the tail window
+    }
+    const ts = typeof record.timestamp === 'string' ? Date.parse(record.timestamp) : NaN;
+    // A record older than the turn: everything above it is older still.
+    if (Number.isFinite(ts) && ts < sinceMs) return null;
+    if (record.type !== 'event_msg') continue;
+    const payload = record.payload as Record<string, unknown> | undefined;
+    if (!payload || typeof payload !== 'object' || payload.type !== 'task_complete') continue;
+    if (!Number.isFinite(ts)) continue; // a completion with no time cannot be placed
+    const text = typeof payload.last_agent_message === 'string' ? payload.last_agent_message.trim() : '';
+    return { completedAt: ts, text };
+  }
+  return null;
 }
 
 /**

@@ -19,6 +19,7 @@ import type { ApmeModule } from './index.js';
 import { loadApmeConfig } from './settings.js';
 import { apmeDashboardHtml } from './dashboard-html.js';
 import { agentCoordinationSummary, deriveTaskTitle, foldActionCounts, EVAL_SCHEMA_VERSION } from '@agentdeck/shared';
+import { readNotGradeable } from './task-gradeability.js';
 import type { ApmeTaskView } from '@agentdeck/shared';
 import { activitySnapshotForStore } from './activity-history.js';
 
@@ -162,6 +163,9 @@ export async function handleApmeRequest(
           title: deriveTaskTitle(t.ownFirstPrompt),
           actionFold: foldActionCounts({ tools, filesTouched: t.filesTouched }),
           coordination: agentCoordinationSummary(tools),
+          // Why the judge declined, when it did — so "unjudged" never reads
+          // as a backlog for a task nobody can score.
+          notGradeable: readNotGradeable((t as { notesJson?: unknown }).notesJson),
         };
       });
       sendJson(res, 200, {

@@ -1060,7 +1060,8 @@ export class ApmeStore {
               SUM(t.end_source = 'interrupted') AS interrupted,
               SUM(t.end_source = 'aborted') AS aborted,
               SUM(t.end_source = 'superseded') AS superseded,
-              SUM(t.end_source IN ('session_end','run_close','clear')) AS sessionEnd,
+              SUM(t.end_source IN ('session_end','clear')) AS sessionEnd,
+              SUM(t.end_source = 'run_close') AS runClose,
               SUM(t.ended_at IS NULL) AS open,
               SUM(t.ended_at IS NOT NULL AND t.end_source IS NULL) AS preInstrument
          FROM turns t JOIN runs r ON r.id = t.run_id
@@ -1078,6 +1079,7 @@ export class ApmeStore {
       aborted: Number(r.aborted ?? 0),
       superseded: Number(r.superseded ?? 0),
       sessionEnd: Number(r.sessionEnd ?? 0),
+      runClose: Number(r.runClose ?? 0),
       open: Number(r.open ?? 0),
       preInstrument: Number(r.preInstrument ?? 0),
     }));
@@ -1314,16 +1316,25 @@ export class ApmeStore {
     ).all(taskId) as Array<Record<string, unknown>>;
   }
 
-  /** Ended tasks (boundary hit) that haven't been judged yet — backfill candidates. */
-  listTasksNeedingSummary(limit: number = 20): Array<{ id: string; runId: string; taskCategory: string | null }> {
+  /** Ended tasks (boundary hit) that haven't been judged yet — the judge
+   *  backlog. The daemon's eval tick drains this a few per sweep; before it
+   *  did (2026-09-03) nothing called it, so a task whose one judge call was
+   *  lost — daemon restarted mid-eval, judge offline, backend probe not yet
+   *  ready — stayed unjudged for good: 1,060 closed tasks sat in `reported`.
+   *  `sinceMs` bounds how far back the drain reaches. */
+  listTasksNeedingSummary(limit: number = 20, sinceMs: number = 0): Array<{ id: string; runId: string; taskCategory: string | null }> {
     if (!this.db) return [];
     const rows = this.db.prepare(
       `SELECT t.id, t.run_id, t.task_category FROM tasks t
        WHERE t.ended_at IS NOT NULL
+         AND t.ended_at >= ?
          AND t.summary IS NULL
+         -- A task the judge already declined (task-gradeability.ts) is not a
+         -- backlog; re-offering it every sweep re-declines it forever.
+         AND (t.notes_json IS NULL OR t.notes_json NOT LIKE '%"notGradeable"%')
        ORDER BY t.ended_at DESC
        LIMIT ?`,
-    ).all(limit) as Array<{ id: string; run_id: string; task_category: string | null }>;
+    ).all(sinceMs, limit) as Array<{ id: string; run_id: string; task_category: string | null }>;
     return rows.map((r) => ({ id: r.id, runId: r.run_id, taskCategory: r.task_category }));
   }
 
@@ -1574,41 +1585,178 @@ export class ApmeStore {
     return rows.map((r) => ({ id: r.id, projectPath: r.project_path, lastActivity: r.last_activity }));
   }
 
-  /** Finalize an abandoned run: close its dangling turns, close its tasks with
-   *  `boundary_signal='orphaned'`, then close the run itself — all stamped at
-   *  `endedAt` (the run's last activity), not `now`, so a run abandoned last
-   *  night doesn't report a 12-hour turn.
+  /** Finalize an abandoned run: close its dangling turns, close its open
+   *  tasks, then close the run itself — all stamped at `endedAt` (the run's
+   *  last activity), not `now`, so a run abandoned last night doesn't report a
+   *  12-hour turn.
+   *
+   *  The task's boundary says what the reaper actually found, not merely that
+   *  it was the reaper who found it. A task whose every turn had closed is a
+   *  task that went quiet after a clean finish — the definition of the
+   *  `idle_gap` boundary (`AGENT_IDLE_GAP_MS`), reached late because the
+   *  in-memory timer that would have fired did not survive the process. Only a
+   *  task still holding an OPEN turn is `orphaned`: the work was cut off
+   *  mid-turn with nothing left to tell how it ended. Stamping both
+   *  `orphaned` put 79% of a week's tasks in the "reaper" chip and hid that
+   *  the segmentation itself had been right. Tasks are classified BEFORE the
+   *  dangling turns are closed, since closing them is what would erase the
+   *  distinction.
    *
    *  Tasks are backfilled with their real first/last turn index when the
    *  in-memory close never ran, since the task rollup reads those columns.
-   *  Returns the closed task ids so the caller can enqueue task-level evals —
-   *  the whole point of closing them. */
-  reapAbandonedRun(runId: string, endedAt: number): Array<{ id: string; category: string | null }> {
+   *  Returns the closed tasks — with the boundary each was given — so the
+   *  caller can enqueue task-level evals, the whole point of closing them. */
+  reapAbandonedRun(runId: string, endedAt: number): Array<{ id: string; category: string | null; boundarySignal: 'idle_gap' | 'orphaned' }> {
     if (!this.db) return [];
     const bounds = this.db.prepare(
       'SELECT MIN(turn_index) AS lo, MAX(turn_index) AS hi FROM turns WHERE run_id = ?',
     ).get(runId) as { lo: number | null; hi: number | null } | undefined;
     const tasks = this.db.prepare(
-      'SELECT id, task_category FROM tasks WHERE run_id = ? AND ended_at IS NULL',
-    ).all(runId) as Array<{ id: string; task_category: string | null }>;
+      `SELECT k.id, k.task_category,
+              EXISTS (SELECT 1 FROM turns t WHERE t.task_id = k.id AND t.ended_at IS NULL) AS has_open_turn
+         FROM tasks k WHERE k.run_id = ? AND k.ended_at IS NULL`,
+    ).all(runId) as Array<{ id: string; task_category: string | null; has_open_turn: number }>;
     const tx = this.db.transaction(() => {
+      // Tasks first: the open-turn test below is destroyed by the turn UPDATE.
+      this.db!.prepare(
+        `UPDATE tasks SET ended_at = ?,
+           boundary_signal = CASE
+             WHEN EXISTS (SELECT 1 FROM turns t WHERE t.task_id = tasks.id AND t.ended_at IS NULL)
+               THEN 'orphaned' ELSE 'idle_gap' END,
+           first_turn_index = COALESCE(first_turn_index, ?),
+           last_turn_index  = COALESCE(last_turn_index, ?),
+           -- The in-memory close resolves a category at close time; a reaped
+           -- task never had one, and the judge then fell back to the generic
+           -- rubric (66 of 135 uncategorised tasks in a week sat on runs
+           -- already classified 'ops'). Inherit the run's.
+           task_category = COALESCE(task_category,
+             (SELECT r.task_category FROM runs r WHERE r.id = tasks.run_id AND r.task_category <> 'unknown'))
+         WHERE run_id = ? AND ended_at IS NULL`,
+      ).run(endedAt, bounds?.lo ?? null, bounds?.hi ?? null, runId);
       this.db!.prepare(
         `UPDATE turns SET ended_at = ?, end_source = 'run_close'
           WHERE run_id = ? AND ended_at IS NULL`,
       ).run(endedAt, runId);
-      this.db!.prepare(
-        `UPDATE tasks SET ended_at = ?, boundary_signal = 'orphaned',
-           first_turn_index = COALESCE(first_turn_index, ?),
-           last_turn_index  = COALESCE(last_turn_index, ?)
-         WHERE run_id = ? AND ended_at IS NULL`,
-      ).run(endedAt, bounds?.lo ?? null, bounds?.hi ?? null, runId);
       this.db!.prepare('UPDATE runs SET ended_at = ? WHERE id = ? AND ended_at IS NULL').run(endedAt, runId);
     });
     try { tx(); } catch (err) {
       debug('APME', `reapAbandonedRun ${runId.slice(0, 8)} failed: ${String(err)}`);
       return [];
     }
-    return tasks.map((t) => ({ id: t.id, category: t.task_category }));
+    return tasks.map((t) => ({
+      id: t.id,
+      category: t.task_category ?? this.getTask(t.id)?.taskCategory ?? null,
+      boundarySignal: t.has_open_turn ? 'orphaned' : 'idle_gap',
+    }));
+  }
+
+  /** Closed tasks that carry a verdict, newest first — the candidates for
+   *  `retractTaskVerdict` when what they were scored on turns out not to
+   *  have been the agent's work. `sinceMs` bounds the sweep. */
+  listJudgedTasks(sinceMs: number, limit: number = 2000): Array<{ id: string }> {
+    if (!this.db) return [];
+    return this.db.prepare(
+      `SELECT id FROM tasks
+        WHERE ended_at IS NOT NULL AND ended_at >= ?
+          AND (composite_score IS NOT NULL OR summary IS NOT NULL)
+          AND (notes_json IS NULL OR notes_json NOT LIKE '%"notGradeable"%')
+        ORDER BY ended_at DESC LIMIT ?`,
+    ).all(sinceMs, limit) as Array<{ id: string }>;
+  }
+
+  /** Closed tasks the judge declined (`notGradeable` stamped), newest first. */
+  listDeclinedTasks(sinceMs: number, limit: number = 2000): Array<{ id: string }> {
+    if (!this.db) return [];
+    return this.db.prepare(
+      `SELECT id FROM tasks
+        WHERE ended_at IS NOT NULL AND ended_at >= ?
+          AND notes_json LIKE '%"notGradeable"%'
+        ORDER BY ended_at DESC LIMIT ?`,
+    ).all(sinceMs, limit) as Array<{ id: string }>;
+  }
+
+  /** Clear a declined task's stamp so the backlog drain offers it again. */
+  readmitTask(taskId: string): void {
+    if (!this.db) return;
+    this.db.prepare(`UPDATE tasks SET notes_json = NULL WHERE id = ? AND notes_json LIKE '%"notGradeable"%'`).run(taskId);
+  }
+
+  /** Withdraw a task's verdict: its judge and scorer rows are deleted and the
+   *  summary / score / outcome cleared, and the row is stamped with why it
+   *  cannot be graded. A verdict reached against silence — or against a
+   *  usage-limit notice standing in for the reply — is not a measurement of
+   *  the agent, and leaving it in place keeps it ranking real work on the
+   *  scorecard and floating to the top of the attention sort. A manually set
+   *  outcome (`agentdeck task cancel`) is the user's statement and is kept. */
+  retractTaskVerdict(taskId: string, reason: string): void {
+    if (!this.db) return;
+    const tx = this.db.transaction(() => {
+      this.db!.prepare(`DELETE FROM evals WHERE task_id = ? AND layer IN ('task_judge', 'trajectory')`).run(taskId);
+      this.db!.prepare(
+        `UPDATE tasks SET summary = NULL, composite_score = NULL,
+           outcome = CASE WHEN outcome = 'abandoned' THEN outcome ELSE NULL END,
+           notes_json = ?
+         WHERE id = ?`,
+      ).run(JSON.stringify({ notGradeable: reason, retractedAt: Date.now() }), taskId);
+    });
+    tx();
+  }
+
+  /** One-time, idempotent re-stamp of tasks the OLD reaper closed as
+   *  `orphaned` although every one of their turns had closed normally —
+   *  the `idle_gap` boundary reached late, which is what the reaper now
+   *  writes. Only rows with EVIDENCE move: every turn carries a known
+   *  `end_source`, none is `run_close` (the old reaper's mark on a turn it
+   *  cut open) and none is still open. Rows from before `end_source`
+   *  existed are left as they are — their closing signal is unknown, and a
+   *  guess would corrupt the chip that exists to show how much to trust the
+   *  segmentation. Measured 2026-09-03: 165 of 1,026 orphaned tasks qualify,
+   *  861 predate the column. Returns the number of rows changed. */
+  reclassifyReapedTasks(): number {
+    if (!this.db) return 0;
+    try {
+      const info = this.db.prepare(
+        `UPDATE tasks SET boundary_signal = 'idle_gap'
+          WHERE boundary_signal = 'orphaned'
+            AND ended_at IS NOT NULL
+            AND EXISTS (SELECT 1 FROM turns u WHERE u.task_id = tasks.id)
+            AND NOT EXISTS (SELECT 1 FROM turns u WHERE u.task_id = tasks.id
+                              AND (u.ended_at IS NULL OR u.end_source IS NULL OR u.end_source = 'run_close'))`,
+      ).run();
+      return Number(info.changes ?? 0);
+    } catch (err) {
+      debug('APME', `reclassifyReapedTasks failed: ${String(err)}`);
+      return 0;
+    }
+  }
+
+  /** Runs still open in the store, oldest first — what a freshly started
+   *  daemon must re-adopt before it handles a single hook. Only the run's
+   *  identity comes from here; the collector reads the turns and tasks back
+   *  through the existing per-run helpers. */
+  listOpenRuns(limit: number = 500): ApmeRunRow[] {
+    if (!this.db) return [];
+    const rows = this.db.prepare(
+      'SELECT * FROM runs WHERE ended_at IS NULL ORDER BY started_at ASC LIMIT ?',
+    ).all(limit) as Array<Record<string, unknown>>;
+    return rows.map(rowToRun);
+  }
+
+  /** Tool-call counters for one turn, recovered from the trajectory it wrote.
+   *  The collector keeps these in memory and flushes them only when the turn
+   *  closes, so a turn open across a restart would otherwise close with
+   *  `tool_calls = 0` whatever it did — every reaped codex turn in the measured
+   *  week read exactly that. `Edit`/`Write` are the two names the live counter
+   *  singles out (`filesModified` / `filesCreated`). */
+  countToolEventsForTurn(taskId: string, turnIndex: number): { toolCalls: number; filesModified: number; filesCreated: number } {
+    if (!this.db) return { toolCalls: 0, filesModified: 0, filesCreated: 0 };
+    const row = this.db.prepare(
+      `SELECT COUNT(*) AS n,
+              COALESCE(SUM(tool_name = 'Edit'), 0) AS edits,
+              COALESCE(SUM(tool_name = 'Write'), 0) AS writes
+         FROM sample_events WHERE task_id = ? AND turn_index = ? AND kind = 'tool'`,
+    ).get(taskId, turnIndex) as { n: number; edits: number; writes: number } | undefined;
+    return { toolCalls: Number(row?.n ?? 0), filesModified: Number(row?.edits ?? 0), filesCreated: Number(row?.writes ?? 0) };
   }
 
   /** Orphaned runs: started long ago, never closed, no turns.

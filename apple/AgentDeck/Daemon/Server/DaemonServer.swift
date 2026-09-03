@@ -11676,7 +11676,7 @@ final class DaemonServer {
                 }
                 guard hasReply else { continue }
                 runner.enqueueTask(runId: run.id, taskId: task.id,
-                                   category: task.category, boundarySignal: "orphaned")
+                                   category: task.category, boundarySignal: task.boundarySignal)
             }
             DaemonLogger.shared.debug("APME", "reaped abandoned run \(run.id.prefix(8)) — \(closedTasks.count) task(s) closed")
         }

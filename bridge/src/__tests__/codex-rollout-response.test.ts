@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { locateCodexRollout, lastAgentMessageFromCodexRollout, codexTurnOutcomeFromRollout } from '../codex-rollout-response.js';
+import { locateCodexRollout, lastAgentMessageFromCodexRollout, codexTurnOutcomeFromRollout, codexTurnCompletionSince, codexTurnOutcomeFromRolloutPath } from '../codex-rollout-response.js';
 
 /**
  * Observed Codex response capture: codex_stop's payload rarely carries the
@@ -46,6 +46,14 @@ describe('codex rollout response reader', () => {
       { type: 'event_msg', payload: { type: 'token_count', info: {} } },
     ]);
     expect(lastAgentMessageFromCodexRollout(SID, root)).toBe('authoritative reply');
+  });
+
+  it('reads the same outcome from a path the hook already carried', () => {
+    const path = writeRollout([
+      { type: 'event_msg', payload: { type: 'task_complete', last_agent_message: 'from path' } },
+    ]);
+    expect(codexTurnOutcomeFromRolloutPath(path).text).toBe('from path');
+    expect(codexTurnOutcomeFromRolloutPath(join(root, 'missing.jsonl')).text).toBe('');
   });
 
   it('falls back to the newest agent_message when no task_complete follows', () => {
@@ -135,6 +143,56 @@ describe('codex rollout response reader', () => {
       ]);
       expect(codexTurnOutcomeFromRollout(SID, root).text).toBe('done');
       expect(lastAgentMessageFromCodexRollout(SID, root)).toBe('done');
+    });
+  });
+
+  /**
+   * Startup recovery for a turn left open across a daemon restart: the
+   * rollout, written by Codex itself, says whether that turn finished. The
+   * scan is bounded by the turn's own start so an OLDER turn's completion can
+   * never be returned for it (real rollouts carry an ISO `timestamp` per
+   * record).
+   */
+  describe('codexTurnCompletionSince', () => {
+    const T0 = Date.parse('2026-08-30T01:18:51.514Z');
+
+    it('returns the task_complete newer than the turn, with its reply', () => {
+      writeRollout([
+        { timestamp: '2026-08-29T20:10:43.358Z', type: 'event_msg', payload: { type: 'task_complete', last_agent_message: 'previous turn' } },
+        { timestamp: '2026-08-30T01:18:51.514Z', type: 'event_msg', payload: { type: 'task_started' } },
+        { timestamp: '2026-08-30T01:20:00.000Z', type: 'event_msg', payload: { type: 'agent_message', message: 'working' } },
+        { timestamp: '2026-08-30T01:31:37.203Z', type: 'event_msg', payload: { type: 'task_complete', last_agent_message: '처리 결과는 다음과 같습니다.' } },
+      ]);
+      expect(codexTurnCompletionSince(SID, T0, root)).toEqual({
+        completedAt: Date.parse('2026-08-30T01:31:37.203Z'),
+        text: '처리 결과는 다음과 같습니다.',
+      });
+    });
+
+    it('never attributes an older turn\'s completion to this one', () => {
+      writeRollout([
+        { timestamp: '2026-08-29T20:10:43.358Z', type: 'event_msg', payload: { type: 'task_complete', last_agent_message: 'previous turn' } },
+        { timestamp: '2026-08-30T01:18:51.514Z', type: 'event_msg', payload: { type: 'task_started' } },
+        { timestamp: '2026-08-30T01:20:00.000Z', type: 'event_msg', payload: { type: 'agent_message', message: 'still going' } },
+      ]);
+      expect(codexTurnCompletionSince(SID, T0, root)).toBeNull();
+    });
+
+    it('a later turn opening after the completion does not hide it', () => {
+      writeRollout([
+        { timestamp: '2026-08-30T01:18:51.514Z', type: 'event_msg', payload: { type: 'task_started' } },
+        { timestamp: '2026-08-30T01:31:37.203Z', type: 'event_msg', payload: { type: 'task_complete', last_agent_message: 'done' } },
+        { timestamp: '2026-08-30T01:31:37.308Z', type: 'event_msg', payload: { type: 'task_started' } },
+      ]);
+      expect(codexTurnCompletionSince(SID, T0, root)?.text).toBe('done');
+    });
+
+    it('records without a timestamp cannot be placed, and a missing rollout is no evidence', () => {
+      expect(codexTurnCompletionSince(SID, T0, root)).toBeNull();
+      writeRollout([
+        { type: 'event_msg', payload: { type: 'task_complete', last_agent_message: 'undated' } },
+      ]);
+      expect(codexTurnCompletionSince(SID, T0, root)).toBeNull();
     });
   });
 });

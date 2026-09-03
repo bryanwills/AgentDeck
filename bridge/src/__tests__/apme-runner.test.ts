@@ -705,8 +705,8 @@ describe('onTaskEvaluated', () => {
     const runId = collector.openRun({
       sessionId: 's-fail', agentType: 'codex-cli', projectName: 'p', projectPath: '/tmp/p',
     });
-    collector.ingestHook('s-fail', 'UserPromptSubmit', { message: { content: 'fix' } });
-    collector.setTurnResponse('s-fail', 'I tried.');
+    collector.ingestHook('s-fail', 'UserPromptSubmit', { message: { content: 'fix the failing build' } });
+    collector.setTurnResponse('s-fail', 'I tried, but the build still fails on the linker step.');
     collector.ingestHook('s-fail', 'PostToolUse', {
       tool_name: 'TodoWrite',
       tool_input: { todos: [{ status: 'completed', content: 'a' }] },
@@ -734,7 +734,7 @@ describe('onTaskEvaluated', () => {
     const runId = collector.openRun({
       sessionId: 's-manual-runner', agentType: 'openclaw', projectName: 'p', projectPath: '/tmp/p',
     });
-    collector.ingestHook('s-manual-runner', 'UserPromptSubmit', { message: { content: 'try this' } });
+    collector.ingestHook('s-manual-runner', 'UserPromptSubmit', { message: { content: 'try this approach again' } });
     collector.setTurnResponse('s-manual-runner', 'partial attempt — gave up halfway.');
     const ok = collector.closeTaskExternal('s-manual-runner', 'manual', 'abandoned');
     expect(ok).toBe(true);

@@ -283,7 +283,13 @@ export type ResponseKind = 'text' | 'tool_only' | 'empty';
  *                       holds no assistant record at all since the turn opened.
  *   - `session_end`     the session ended while the turn was open (an
  *                       abandoned turn).
- *   - `run_close`       the run was closed or reaped out from under the turn.
+ *   - `run_close`       the abandoned-run reaper closed the run out from under
+ *                       a turn that was still open. Measured 2026-09-03 over
+ *                       5.5 days: 45 of the 52 such turns had a daemon restart
+ *                       between their start and the session's next turn, i.e.
+ *                       the Stop was not lost by the agent — the process that
+ *                       would have received it was gone. Reported in its own
+ *                       column so it cannot pass for a session end.
  *   - `clear`           `/clear` split the run mid-turn.
  *
  *  NULL means either "still open" (`ended_at IS NULL`) or, on a row written
@@ -314,8 +320,16 @@ export interface ApmeStopDeliveryRow {
   aborted: number;
   /** Prompts folded into the following turn before they ran. No Stop owed. */
   superseded: number;
-  /** `session_end` + `run_close` + `clear` folded together. */
+  /** `session_end` + `clear`: the turn was open when the user ended or reset
+   *  the session. No longer includes `run_close`, which is a different fact. */
   sessionEnd: number;
+  /** `run_close`: the reaper closed the run under a still-open turn — the
+   *  collector that would have received the Stop no longer existed (a daemon
+   *  restart, overwhelmingly). Folding this into `sessionEnd` is what made a
+   *  measured 29% codex loss report as 11%. Not in the loss ratio either: the
+   *  hook may well have fired into a dead port, which is not the agent's
+   *  fault, and the honest number for it is this column. */
+  runClose: number;
   /** Still open at query time. */
   open: number;
   /** Closed, but written before `end_source` existed — signal unknown. */

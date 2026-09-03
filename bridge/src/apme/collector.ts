@@ -22,12 +22,13 @@ import { resolveProjectName } from '../utils/project-name.js';
 import type { UsageSnapshot } from '../types.js';
 import type { SessionEntry } from '../session-registry.js';
 import type { ApmeStore } from './store.js';
-import type { ApmeRunRow } from './types.js';
+import type { ApmeRunRow, ApmeTaskRow } from './types.js';
 import type { AgentType, TelemetrySpan, ApmeSampleEventRow, TrajectoryEventKind, TurnEndSource } from '@agentdeck/shared';
 import { AGENT_IDLE_GAP_MS, deriveTaskTitle, isPricedModel, normalizeModelProvider, priceUsd } from '@agentdeck/shared';
 import type { ApmeHwSampler } from './hw-sampler.js';
 import { classifyRunSmart, computeSignals, classify } from './classifier.js';
 import { readOpenTurnEvidence, type OpenTurnEvidence } from './claude-transcript-reader.js';
+import { codexTurnCompletionSince, type CodexTurnCompletion } from '../codex-rollout-response.js';
 
 export interface OpenRunInput {
   sessionId: string;
@@ -249,6 +250,11 @@ export class ApmeCollector {
    *  constant rests on. */
   private readonly sessionToIdleGapTimer = new Map<string, ReturnType<typeof setTimeout>>();
 
+  /** Sessions whose run was re-adopted from the store at startup — lets a
+   *  newer open run for the same session replace the older one during the
+   *  same rehydrate pass without touching runs opened live since. */
+  private readonly rehydratedSessions = new Set<string>();
+
   constructor(
     private readonly store: ApmeStore,
     private readonly hwSampler?: ApmeHwSampler,
@@ -258,7 +264,139 @@ export class ApmeCollector {
     private readonly openTurnProbe: (transcriptPath: string, sinceMs: number) => OpenTurnEvidence | null = readOpenTurnEvidence,
     /** Injectable for tests only — production call sites take the default. */
     private readonly idleGapMs: number = AGENT_IDLE_GAP_MS,
+    /** Whether a Codex turn open at startup completed per its rollout — see
+     *  `rehydrateOpenRuns`. Injectable for tests; the default reads the
+     *  rollout tail under `~/.codex/sessions`. */
+    private readonly codexCompletionProbe: (sessionId: string, sinceMs: number) => CodexTurnCompletion | null = codexTurnCompletionSince,
   ) {}
+
+  /** Re-adopt every run the store still holds open, so the daemon that just
+   *  started continues them instead of stranding them.
+   *
+   *  The collector's whole state is in-memory maps, and a daemon restart drops
+   *  all of it while the sessions it was observing carry on. Before this, the
+   *  next hook from such a session found no run, opened a fresh one, and the
+   *  old one sat open until the abandoned-run reaper closed it two hours
+   *  later — its task `orphaned`, its open turn's tool counters at zero, and
+   *  the Stop that did arrive discarded for want of a turn to close. Measured
+   *  over 5.5 days (2026-09-03) on a dev machine that restarted the daemon 40
+   *  times: 60 of the 68 tasks the reaper closed straddled a restart, and the
+   *  idle-gap boundary that had just been added could not fire for any of
+   *  them, since its timer lived in the process that died.
+   *
+   *  Per open run, in store order: the session→run edge is restored; the open
+   *  task (if any) is rebuilt with its real turn span and first prompt; an
+   *  open turn is rebuilt with its counters recovered from the trajectory it
+   *  wrote; and when there is no open turn but a closed one, the idle-gap
+   *  timer is armed for whatever remains of the gap — zero if it already
+   *  elapsed during the downtime, which closes the task on the next tick as
+   *  the `idle_gap` it always was. A Codex turn still open is checked once
+   *  against its rollout: a `task_complete` newer than the turn is the Stop
+   *  this daemon never received, and closes it as `synthetic_stop` with the
+   *  reply the rollout recorded.
+   *
+   *  Two runs open under one session id (an older defect's residue) resolve
+   *  to the newest; the rest stay for the reaper. Must run before the first
+   *  hook is served, and only in the process that owns the hook port — a
+   *  session bridge adopting the daemon's runs would steal them. */
+  rehydrateOpenRuns(now: number = Date.now()): { runs: number; tasks: number; turns: number; armed: number; recovered: number } {
+    const out = { runs: 0, tasks: 0, turns: 0, armed: 0, recovered: 0 };
+    if (!this.store.enabled) return out;
+    let runs: ApmeRunRow[];
+    try { runs = this.store.listOpenRuns(); } catch (err) {
+      debug('APME', `rehydrate: listOpenRuns failed: ${String(err)}`);
+      return out;
+    }
+    for (const run of runs) {
+      // Newest run per session wins; store order is oldest-first, so a later
+      // row simply replaces the mapping an earlier one set.
+      if (this.sessionToRun.has(run.sessionId) && !this.rehydratedSessions.has(run.sessionId)) continue;
+      this.rehydratedSessions.add(run.sessionId);
+      this.sessionToRun.set(run.sessionId, run.id);
+      this.sessionToAgentType.set(run.sessionId, run.agentType);
+      out.runs++;
+      let turns: Array<Record<string, unknown>> = [];
+      let tasks: ApmeTaskRow[] = [];
+      try {
+        turns = this.store.listTurns(run.id);
+        tasks = this.store.listTasksForRun(run.id);
+      } catch (err) {
+        debug('APME', `rehydrate: run ${run.id.slice(0, 8)} unreadable: ${String(err)}`);
+        continue;
+      }
+      this.runTaskCount.set(run.id, tasks.length);
+      const lastTurn = turns.length > 0 ? turns[turns.length - 1]! : null;
+      if (lastTurn) this.sessionToLastTurnId.set(run.sessionId, String(lastTurn.id));
+
+      const openTask = tasks.find((t) => t.endedAt == null) ?? null;
+      let activeTask: ActiveTask | null = null;
+      if (openTask) {
+        const taskTurns = turns.filter((t) => t.task_id === openTask.id);
+        const first = taskTurns[0];
+        const firstIndex = openTask.firstTurnIndex ?? (first ? Number(first.turn_index) : null);
+        const lastIndex = taskTurns.length > 0
+          ? Number(taskTurns[taskTurns.length - 1]!.turn_index)
+          : (openTask.lastTurnIndex ?? firstIndex);
+        activeTask = {
+          id: openTask.id,
+          runId: run.id,
+          index: openTask.taskIndex,
+          startedAt: openTask.startedAt,
+          firstTurnIndex: firstIndex,
+          lastTurnIndex: lastIndex,
+          firstPrompt: typeof first?.prompt === 'string' ? first.prompt : null,
+          // The header is promoted on the second turn; a task that already
+          // has two either emitted it or is owed it — either way the closure
+          // row must be allowed to render. Single-turn tasks stay deferred.
+          timelineEmitted: taskTurns.length >= 2,
+        };
+        this.sessionToTask.set(run.sessionId, activeTask);
+        out.tasks++;
+      }
+      this.sessionToUsage.delete(run.sessionId);
+
+      const openTurn = lastTurn && lastTurn.ended_at == null ? lastTurn : null;
+      if (openTurn) {
+        const index = Number(openTurn.turn_index);
+        const counters = activeTask
+          ? this.store.countToolEventsForTurn(activeTask.id, index)
+          : { toolCalls: 0, filesModified: 0, filesCreated: 0 };
+        this.sessionToTurn.set(run.sessionId, {
+          id: String(openTurn.id),
+          runId: run.id,
+          index,
+          startedAt: Number(openTurn.started_at),
+          toolCalls: counters.toolCalls,
+          filesModified: counters.filesModified,
+          filesCreated: counters.filesCreated,
+          gitBefore: typeof openTurn.git_before === 'string' ? openTurn.git_before : null,
+          prompt: typeof openTurn.prompt === 'string' ? openTurn.prompt : null,
+          hasResponse: typeof openTurn.response === 'string' && openTurn.response.length > 0,
+        });
+        out.turns++;
+        if (run.agentType === 'codex-cli') {
+          let completion: CodexTurnCompletion | null = null;
+          try { completion = this.codexCompletionProbe(run.sessionId, Number(openTurn.started_at)); }
+          catch { completion = null; }
+          if (completion) {
+            if (completion.text) this.setTurnResponse(run.sessionId, completion.text);
+            this.noteTurnStop(run.sessionId, { synthetic: true });
+            out.recovered++;
+            debug('APME', `rehydrate: codex turn ${String(openTurn.id).slice(0, 8)} completed at ${new Date(completion.completedAt).toISOString()} per rollout — closed as synthetic_stop`);
+          }
+        }
+      } else if (activeTask && lastTurn) {
+        const lastEnd = Number(lastTurn.ended_at);
+        const remaining = Math.max(0, this.idleGapMs - Math.max(0, now - lastEnd));
+        this.armIdleGapTimer(run.sessionId, remaining);
+        out.armed++;
+      }
+    }
+    if (out.runs > 0) {
+      debug('APME', `rehydrated ${out.runs} open run(s): ${out.tasks} task(s), ${out.turns} open turn(s), ${out.armed} idle timer(s) re-armed, ${out.recovered} codex turn(s) closed from rollout`);
+    }
+    return out;
+  }
 
   /** Start a new run and return its id. Safe to call if store disabled (returns ''). */
   openRun(input: OpenRunInput): string {
@@ -734,7 +872,7 @@ export class ApmeCollector {
   /** Arm the per-session idle-gap timer. Called from `closeTurn` — the turn
    *  just finished, so the gap being measured is genuine idle time, never the
    *  agent's own working time. Re-arming replaces any previous timer. */
-  private armIdleGapTimer(sessionId: string): void {
+  private armIdleGapTimer(sessionId: string, delayMs: number = this.idleGapMs): void {
     this.clearIdleGapTimer(sessionId);
     const timer = setTimeout(() => {
       this.sessionToIdleGapTimer.delete(sessionId);
@@ -744,7 +882,7 @@ export class ApmeCollector {
       if (!this.sessionToTask.has(sessionId)) return;
       debug('APME', `idle gap (${Math.round(this.idleGapMs / 1000)}s) → closing task for ${sessionId.slice(0, 8)}`);
       this.closeTask(sessionId, 'idle_gap');
-    }, this.idleGapMs);
+    }, delayMs);
     // Never hold the process open for an idle bookkeeping timer.
     timer.unref?.();
     this.sessionToIdleGapTimer.set(sessionId, timer);
@@ -1403,14 +1541,13 @@ export class ApmeCollector {
   /** Update model id when the bridge resolves which model is in use. */
   updateModel(sessionId: string, modelId: string | undefined | null): void {
     if (!this.store.enabled || !modelId) return;
-    const runId = this.sessionToRun.get(sessionId);
-    if (!runId) return;
-    try {
-      this.store.updateRun(runId, {
-        modelId,
-        provider: normalizeModelProvider(undefined, modelId),
-      });
-    } catch { /* ignore */ }
+    if (!this.sessionToRun.has(sessionId)) return;
+    // The TURN is the scorecard's identity source (`turns.model_id`), and
+    // this used to write the run only — so every hook-observed Claude and
+    // Codex turn carried NULL there (465 + 183 in one week, 2026-09-03) and
+    // the per-model scorecard ranked nothing. The run keeps its
+    // latest-observed value for legacy readers.
+    this.updateTurnIdentity(sessionId, modelId);
   }
 
   /** Persist the model/provider on the assistant message's own turn.

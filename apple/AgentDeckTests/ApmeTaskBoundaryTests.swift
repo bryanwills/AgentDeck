@@ -1487,5 +1487,46 @@ final class ApmeTaskBoundaryTests: XCTestCase {
             XCTAssertEqual(coord?.messages, v.coordination?.messages, v.note)
         }
     }
+
+    // MARK: - Abandoned-run reaper honesty
+
+    /// Mirrors bridge/src/__tests__/apme-abandoned-run-reaper.test.ts "what
+    /// the reaper says it found": a task whose every turn had closed went
+    /// quiet after a clean finish (`idle_gap`, reached late); only a task
+    /// still holding an open turn is `orphaned`. Both daemons write this
+    /// store, so the two reapers must stamp the same boundary for the same
+    /// rows.
+    func testReapAbandonedRunClassifiesTasksByOpenTurn() async throws {
+        let tmp = try makeTempStore()
+        defer { cleanup(tmp) }
+        let store = tmp.store
+        let lastActivity = Int(Date().timeIntervalSince1970 * 1000) - 3 * 3600_000
+        let runId = UUID().uuidString
+        store.insertRun(ApmeRun(
+            id: runId, sessionId: "s-reap", agentType: "codex-cli",
+            modelId: nil, projectName: "demo", projectPath: nil,
+            taskPrompt: "do the thing", startedAt: lastActivity - 60_000
+        ))
+        store.insertTask(ApmeTask(id: "t-quiet", runId: runId, taskIndex: 0,
+                                  boundarySignal: "open", startedAt: lastActivity - 60_000))
+        store.insertTurn(id: "u-quiet", runId: runId, turnIndex: 0, prompt: "done cleanly",
+                         startedAt: lastActivity - 30_000, taskId: "t-quiet")
+        store.updateTurn(id: "u-quiet", fields: ["endedAt": lastActivity - 1_000, "endSource": "stop"])
+        store.insertTask(ApmeTask(id: "t-cut", runId: runId, taskIndex: 1,
+                                  boundarySignal: "open", startedAt: lastActivity))
+        store.insertTurn(id: "u-cut", runId: runId, turnIndex: 1, prompt: "cut off",
+                         startedAt: lastActivity, taskId: "t-cut")
+
+        let closed = store.reapAbandonedRun(runId: runId, endedAt: lastActivity)
+        let byId = Dictionary(uniqueKeysWithValues: closed.map { ($0.id, $0.boundarySignal) })
+        XCTAssertEqual(byId, ["t-quiet": "idle_gap", "t-cut": "orphaned"])
+        XCTAssertEqual(store.getTask(id: "t-quiet")?.boundarySignal, "idle_gap")
+        XCTAssertEqual(store.getTask(id: "t-cut")?.boundarySignal, "orphaned")
+        let cut = store.listTurnsForTask("t-cut").first
+        XCTAssertEqual(cut?["end_source"] as? String, "run_close")
+        XCTAssertEqual(cut?["ended_at"] as? Int, lastActivity)
+        let quiet = store.listTurnsForTask("t-quiet").first
+        XCTAssertEqual(quiet?["end_source"] as? String, "stop", "a closed turn is left as it was")
+    }
 }
 #endif
