@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { ApmeStore } from '../apme/store.js';
@@ -7,10 +7,12 @@ import { ApmeCollector } from '../apme/collector.js';
 import {
   computeSignals,
   classify,
+  classifyWithLlm,
   classifyRun,
   type TaskSignals,
   type TaskCategory,
 } from '../apme/classifier.js';
+import { clearMlxSettingsCache } from '@agentdeck/shared';
 
 async function makeStore(): Promise<ApmeStore> {
   const dir = mkdtempSync(join(tmpdir(), 'apme-cls-'));
@@ -130,6 +132,50 @@ describe('classify()', () => {
       toolCounts: { Read: 2, Bash: 2 }, totalToolCalls: 4, sessionDurationSec: 300,
       turnCount: 10,
     }))).toBe('unknown');
+  });
+});
+
+describe('classifyWithLlm()', () => {
+  const originalFetch = globalThis.fetch;
+  const originalDataDir = process.env.AGENTDECK_DATA_DIR;
+  let settingsDir: string;
+
+  beforeEach(() => {
+    settingsDir = mkdtempSync(join(tmpdir(), 'apme-classifier-settings-'));
+    process.env.AGENTDECK_DATA_DIR = settingsDir;
+    writeFileSync(join(settingsDir, 'settings.json'), JSON.stringify({
+      llm: { mlx: { endpoint: 'http://127.0.0.1:8800', model: 'mlx-community/gemma-pinned' } },
+    }));
+    clearMlxSettingsCache();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    rmSync(settingsDir, { recursive: true, force: true });
+    if (originalDataDir === undefined) delete process.env.AGENTDECK_DATA_DIR;
+    else process.env.AGENTDECK_DATA_DIR = originalDataDir;
+    clearMlxSettingsCache();
+    vi.restoreAllMocks();
+  });
+
+  it('uses the configured MLX pin without probing a stale download catalog', async () => {
+    const urls: string[] = [];
+    let sentModel = '';
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      urls.push(String(url));
+      const body = JSON.parse(String(init?.body)) as { model: string };
+      sentModel = body.model;
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'research' } }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    const category = await classifyWithLlm('Investigate the current behavior', makeBaseSignals());
+
+    expect(category).toBe('research');
+    expect(sentModel).toBe('mlx-community/gemma-pinned');
+    expect(urls).toEqual(['http://127.0.0.1:8800/chat/completions']);
   });
 });
 

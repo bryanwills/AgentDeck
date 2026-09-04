@@ -1230,8 +1230,9 @@ export async function probeJudgeBackend(cfg: ApmeJudgeConfig): Promise<JudgeBack
           endpoint: base, checkedAt,
         };
       }
-      // Cheapest possible inference probe: max_tokens=1, temperature=0. If MLX
-      // accepts this without a model error, callMlx() will succeed too.
+      // Cheapest possible inference probe: max_tokens=1, temperature=0. The
+      // server is shared with other local agents, so allow one normal request
+      // ahead of the ping instead of marking a healthy serial backend down.
       const ping = await fetch(`${base}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1240,7 +1241,7 @@ export async function probeJudgeBackend(cfg: ApmeJudgeConfig): Promise<JudgeBack
           messages: [{ role: 'user', content: 'ping' }],
           max_tokens: 1, temperature: 0,
         }),
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(30_000),
       }).catch((e) => ({ ok: false, status: 0, statusText: String(e).slice(0, 80) } as Response));
       if (!ping.ok) {
         const detail = ping.status ? `HTTP ${ping.status}` : (ping as { statusText?: string }).statusText ?? 'no response';
@@ -1465,20 +1466,42 @@ async function callMlx(prompt: string, cfg: ApmeJudgeConfig): Promise<string> {
     } catch { /* use configured model */ }
   }
 
-  const resp = await fetch(url, {
+  const request = (userPrompt: string) => fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
       messages: [
         { role: 'system', content: 'You are an exacting code evaluator. Reply with strict JSON only.' },
-        { role: 'user', content: prompt },
+        { role: 'user', content: userPrompt },
       ],
       temperature: 0.0,
       max_tokens: 800,
     }),
-    signal: AbortSignal.timeout(60_000),
+    // Long task_rollup prompts can cross 60s at the tail under sustained
+    // local load (68.7s observed with Gemma 4). Keep the timeout bounded but
+    // leave enough room for one serial judge request to finish.
+    signal: AbortSignal.timeout(90_000),
   });
+
+  let resp = await request(prompt);
+  if (!resp.ok && resp.status === 400) {
+    const detail = await resp.text();
+    const overflow = detail.match(/Request needs \d+ context tokens \((\d+) prompt \+ (\d+) max generation\), but MAX_KV_SIZE is (\d+)/);
+    if (overflow) {
+      const promptTokens = Number(overflow[1]);
+      const maxGeneration = Number(overflow[2]);
+      const maxKv = Number(overflow[3]);
+      // The server gives the tokenizer-accurate count. Keep a small margin for
+      // the chat template, then preserve the rubric/initial goal at the front
+      // and the latest turns/trajectory/instruction at the end.
+      const targetPromptTokens = Math.max(256, maxKv - maxGeneration - 128);
+      const ratio = Math.min(0.95, (targetPromptTokens / promptTokens) * 0.98);
+      const compacted = compactPromptForMlxContext(prompt, Math.max(1000, Math.floor(prompt.length * ratio)));
+      debug('APME', `MLX context overflow (${promptTokens}+${maxGeneration}>${maxKv}); retrying with ${compacted.length}/${prompt.length} prompt chars`);
+      resp = await request(compacted);
+    }
+  }
   if (!resp.ok) throw new Error(`MLX judge HTTP ${resp.status}`);
   const json = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
   const text = json.choices?.[0]?.message?.content;
@@ -1486,6 +1509,15 @@ async function callMlx(prompt: string, cfg: ApmeJudgeConfig): Promise<string> {
     throw new Error('MLX judge returned empty content');
   }
   return text;
+}
+
+function compactPromptForMlxContext(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const marker = '\n\n… [middle omitted to fit local context] …\n\n';
+  const available = Math.max(0, maxChars - marker.length);
+  const headChars = Math.floor(available * 0.45);
+  const tailChars = available - headChars;
+  return text.slice(0, headChars) + marker + text.slice(text.length - tailChars);
 }
 
 /** Normalize a user-supplied base/endpoint to the chat-completions URL.
@@ -1725,7 +1757,15 @@ export function parseJudgeJson(text: string): ParsedJudge | null {
   if (!match) return null;
   let obj: Record<string, unknown>;
   try { obj = JSON.parse(match[0]); }
-  catch { return null; }
+  catch {
+    // Local judges occasionally emit otherwise-valid JSON with a comma before
+    // `}`/`]`, or omit the opening quote of an auxiliary object key while
+    // retaining its closing quote (both observed with Gemma 4 on long
+    // task_rollup prompts). Repair only structural text outside strings so
+    // evidence content remains byte-for-byte intact.
+    try { obj = JSON.parse(repairJudgeJson(match[0])); }
+    catch { return null; }
+  }
 
   // Accept any numeric axis — category-specific rubrics define their own
   // (conversation: accuracy/helpfulness/conciseness; research: thoroughness/…;
@@ -1750,6 +1790,82 @@ export function parseJudgeJson(text: string): ParsedJudge | null {
     ? obj.summary.trim().slice(0, 280)
     : undefined;
   return { scores, reasoning, done, missed, summary };
+}
+
+function repairJudgeJson(text: string): string {
+  return quoteBareClosingJsonKeys(stripTrailingJsonCommas(text));
+}
+
+/** Repair `...,evidence":"..."` only when the bare ASCII identifier is in an
+ *  object-key position and still has its closing quote + colon. A scanner is
+ *  used instead of a regex so the same byte sequence inside evidence strings
+ *  is never changed. */
+function quoteBareClosingJsonKeys(text: string): string {
+  let result = '';
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (inString) {
+      result += char;
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      result += char;
+      continue;
+    }
+    if (/[A-Za-z_]/.test(char)) {
+      let previous = result.length - 1;
+      while (previous >= 0 && /\s/.test(result[previous])) previous--;
+      if (result[previous] === '{' || result[previous] === ',') {
+        let end = i + 1;
+        while (end < text.length && /[A-Za-z0-9_]/.test(text[end])) end++;
+        if (text[end] === '"') {
+          let colon = end + 1;
+          while (colon < text.length && /\s/.test(text[colon])) colon++;
+          if (text[colon] === ':') {
+            result += `"${text.slice(i, end + 1)}`;
+            i = end;
+            continue;
+          }
+        }
+      }
+    }
+    result += char;
+  }
+  return result;
+}
+
+function stripTrailingJsonCommas(text: string): string {
+  let result = '';
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (inString) {
+      result += char;
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      result += char;
+      continue;
+    }
+    if (char === ',') {
+      let next = i + 1;
+      while (next < text.length && /\s/.test(text[next])) next++;
+      if (text[next] === '}' || text[next] === ']') continue;
+    }
+    result += char;
+  }
+  return result;
 }
 
 function clamp01(n: number): number {

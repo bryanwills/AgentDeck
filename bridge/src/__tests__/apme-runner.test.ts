@@ -96,6 +96,21 @@ describe('parseJudgeJson', () => {
     expect(p?.scores.overall).toBeCloseTo(0.55);
   });
 
+  it('repairs trailing commas outside strings from local judge output', () => {
+    const txt = '{"overall":0.7,"reasoning":"keep ,} text","done":["fixed",],"missed":[],}';
+    const p = parseJudgeJson(txt);
+    expect(p?.scores.overall).toBeCloseTo(0.7);
+    expect(p?.reasoning).toBe('keep ,} text');
+    expect(p?.done).toEqual(['fixed']);
+  });
+
+  it('repairs a missing opening quote on an object key without changing string evidence', () => {
+    const txt = '{"overall":0.4,"reasoning":"keep {evidence\\\": text","done":[],"missed":[],evidence":"observed"}';
+    const p = parseJudgeJson(txt);
+    expect(p?.scores.overall).toBeCloseTo(0.4);
+    expect(p?.reasoning).toBe('keep {evidence": text');
+  });
+
   it('returns null when there is no JSON at all', () => {
     expect(parseJudgeJson('no json here')).toBeNull();
   });
@@ -288,6 +303,39 @@ describe('callJudge foundationModels routing', () => {
 
     expect(fmCalls).toBe(1);
     expect(mlxCalls).toBe(2);
+  });
+
+  it('compacts and retries once when MLX reports an exact context overflow', async () => {
+    const sentPrompts: string[] = [];
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
+      sentPrompts.push(body.messages[1].content);
+      if (sentPrompts.length === 1) {
+        return new Response(JSON.stringify({
+          detail: 'Request needs 16929 context tokens (16129 prompt + 800 max generation), but MAX_KV_SIZE is 16384.',
+        }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: '{"overall":0.6}' } }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const mod = await import('../apme/runner.js');
+    const prompt = `rubric-start\n${'x'.repeat(40_000)}\nlatest-result`;
+    const out = await mod.callJudge(prompt, {
+      ...DEFAULT_APME_CONFIG.judge,
+      backend: 'mlx',
+      endpoint: 'http://127.0.0.1:8800/v1/chat/completions',
+      model: 'gemma-test',
+    });
+
+    expect(out).toBe('{"overall":0.6}');
+    expect(sentPrompts).toHaveLength(2);
+    expect(sentPrompts[1].length).toBeLessThan(sentPrompts[0].length);
+    expect(sentPrompts[1]).toContain('[middle omitted to fit local context]');
+    expect(sentPrompts[1]).toMatch(/^rubric-start/);
+    expect(sentPrompts[1]).toMatch(/latest-result$/);
   });
 });
 

@@ -13,6 +13,7 @@
  */
 
 import type { ApmeStore } from './store.js';
+import { loadMlxSettings, resolveMlxModel } from '@agentdeck/shared';
 
 // ─── TaskSignals — agent-agnostic feature vector ─────────────────────────────
 
@@ -254,17 +255,24 @@ Files modified: ${signals.filesModified}, created: ${signals.filesCreated}
 Duration: ${signals.sessionDurationSec}s, turns: ${signals.turnCount}`;
 
   try {
-    // Auto-detect MLX endpoint + model (same logic as runner.ts callMlx)
-    let model = 'default';
+    // Use the explicit llm.mlx pin before catalog discovery. mlx-vlm's model
+    // endpoint lists downloaded models, not just the loaded one; treating its
+    // first row as active can unload the operating model and hot-swap an old
+    // candidate. Only probe when the user has not pinned a model.
+    const pinnedModel = loadMlxSettings().model;
+    let probedModel: string | null = null;
     const base = 'http://127.0.0.1:8800';
-    for (const path of ['/v1/models', '/models']) {
-      const mResp = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(2000) }).catch(() => null);
-      if (mResp?.ok) {
-        const mJson = await mResp.json() as { data?: Array<{ id?: string }> };
-        const first = mJson.data?.find(m => m.id && !m.id.toLowerCase().includes('nanollava'))?.id;
-        if (first) { model = first; break; }
+    if (!pinnedModel) {
+      for (const path of ['/v1/models', '/models']) {
+        const mResp = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(2000) }).catch(() => null);
+        if (mResp?.ok) {
+          const mJson = await mResp.json() as { data?: Array<{ id?: string }> };
+          const first = mJson.data?.find(m => m.id && !m.id.toLowerCase().includes('nanollava'))?.id;
+          if (first) { probedModel = first; break; }
+        }
       }
     }
+    const model = resolveMlxModel(probedModel);
 
     const resp = await fetch(`${base}/chat/completions`, {
       method: 'POST',
