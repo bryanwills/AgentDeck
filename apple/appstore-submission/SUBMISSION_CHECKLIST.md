@@ -1,7 +1,9 @@
 # App Store Connect submission checklist
 
-> **Release status (2026-09-03):** iOS 1.2.0 (5801) approved and live (lookup API
-> reports 1.2.0 released 2026-09-02T07:12Z). macOS 1.2.0 (5801)
+> **Release status (2026-09-05):** 1.2.0 (5801) is live on both platforms. iOS was
+> approved and released 2026-09-02T07:12Z (lookup API); macOS was approved and
+> released on 2026-09-04 (public Mac page `Version 1.2.0 · 5h ago` at
+> 2026-09-05T01:41Z). Path to the macOS release: macOS 1.2.0 (5801)
 > was rejected under Guideline 2.3.10 (What's New named Android) and 5.2.5
 > (physical-Mac evidence of the WeatherKit mark/legal link). Root cause of the
 > second: the App ID had WeatherKit under Capabilities but not App Services, so
@@ -12,7 +14,8 @@
 > `cea60cdc-8435-44e6-9956-2958c6208404`. **A reply does not resubmit**: the
 > submission stayed `해결되지 않은 문제` overnight until the version page's
 > `심사 업데이트` was pressed (item → `심사 준비됨`) and then `앱 심사에 다시 제출`
-> on the submission page (→ `심사 대기 중`, 2026-09-03 KST). Awaiting review.
+> on the submission page (→ `심사 대기 중`, 2026-09-03 KST → `심사 중` on 09-04 →
+> approved and released 09-04).
 
 ## App record
 
