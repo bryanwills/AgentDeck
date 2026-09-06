@@ -1129,7 +1129,12 @@ export async function callJudgeWithMeta(prompt: string, judgeCfg: ApmeJudgeConfi
       const text = await callMlx(prompt, judgeCfg);
       return { text, effectiveBackend: 'mlx', effectiveLabel: effectiveJudgeModelTag(judgeCfg) };
     } catch (err) {
-      debug('APME', `mlx unavailable, fallback to foundationModels: ${String(err)}`);
+      // "unavailable" used to cover truncation too, and those are different
+      // facts: the server answered, its answer was cut at `max_tokens`, and the
+      // verdict is discarded. Both fall through to the FM floor — which is a
+      // measurably weaker judge — so the switch has to be visible in the normal
+      // log, not only under DEBUG, or its rate is unmeasurable.
+      log(`APME judge: mlx produced no verdict (${String(err)}) — falling back to foundationModels`);
       const fmCfg = sanitizeForFoundationModels(judgeCfg);
       const text = await callFoundationModels(prompt, fmCfg);
       return { text, effectiveBackend: 'foundationModels', effectiveLabel: effectiveJudgeModelTag(fmCfg) };
@@ -1503,9 +1508,10 @@ async function callMlx(prompt: string, cfg: ApmeJudgeConfig): Promise<string> {
     }
   }
   if (!resp.ok) throw new Error(`MLX judge HTTP ${resp.status}`);
-  const json = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
+  const json = await resp.json() as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }> };
+  if (json.choices?.[0]?.finish_reason === 'length') throw new Error('MLX judge reached output limit before completion');
   const text = json.choices?.[0]?.message?.content;
-  if (typeof text !== 'string' || text.length === 0) {
+  if (typeof text !== 'string' || text.trim().length === 0) {
     throw new Error('MLX judge returned empty content');
   }
   return text;
@@ -1593,11 +1599,13 @@ async function callOpenAICompatible(prompt: string, cfg: ApmeJudgeConfig): Promi
       ],
       temperature: 0,
       max_tokens: 1024,
+      ...(cfg.reasoningEffort ? { reasoning_effort: cfg.reasoningEffort } : {}),
     }),
     signal: AbortSignal.timeout(90_000),
   });
   if (!resp.ok) throw new Error(`openai judge HTTP ${resp.status} (${url})`);
-  const json = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
+  const json = await resp.json() as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }> };
+  if (json.choices?.[0]?.finish_reason === 'length') throw new Error('openai judge reached output limit before completion');
   const text = json.choices?.[0]?.message?.content;
   if (typeof text !== 'string' || text.trim().length === 0) throw new Error('openai judge returned empty content');
   return text;
