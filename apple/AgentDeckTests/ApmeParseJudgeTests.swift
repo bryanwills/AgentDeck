@@ -17,25 +17,121 @@ final class ApmeParseJudgeTests: XCTestCase {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("shared/apme-judge-response-vectors.json")
         let vectors = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [[String: Any]])
-        XCTAssertGreaterThanOrEqual(vectors.count, 9)
+        XCTAssertGreaterThanOrEqual(vectors.count, 16)
         for vector in vectors {
             let note = try XCTUnwrap(vector["note"] as? String)
             let response = try XCTUnwrap(vector["response"] as? [String: Any])
             let data = try JSONSerialization.data(withJSONObject: response)
             if vector["accepted"] as? Bool == true {
                 let content = try ApmeJudgeChatResponse.content(data)
-                XCTAssertNotNil(ApmeRunner.parseJudgeJson(content), note)
+                // `accepted` is the transport gate; `verdict` (defaulting to it)
+                // is whether the parser must then produce one, so the vectors
+                // pin both daemons end to end rather than one at each layer.
+                if vector["verdict"] as? Bool ?? true {
+                    XCTAssertNotNil(ApmeRunner.parseJudgeJson(content), note)
+                } else {
+                    XCTAssertNil(ApmeRunner.parseJudgeJson(content), note)
+                }
             } else {
                 XCTAssertThrowsError(try ApmeJudgeChatResponse.content(data), note)
             }
         }
     }
 
-    func testOutputLimitHasAnExplicitErrorEvenWithValidJson() {
-        let data = Data(#"{"choices":[{"finish_reason":"length","message":{"content":"{\"overall\":0.8}"}}]}"#.utf8)
-        XCTAssertThrowsError(try ApmeJudgeChatResponse.content(data)) { error in
-            guard case ApmeJudgeOpenAI.JudgeError.outputLimit = error else {
-                return XCTFail("Expected output limit, got \(error)")
+    /// A cut response is not a verdict, whatever the body looks like. An
+    /// exemption for "its object closed" was tried and removed — brace topology
+    /// cannot tell whether the model finished, and it had no measured
+    /// beneficiary on this fleet.
+    func testOutputLimitRejectsWhateverTheBodyLooksLike() {
+        for content in [#"{\"overall\":0."#, #"{\"overall\":0.8} and then some prose"#] {
+            let data = Data(#"{"choices":[{"finish_reason":"length","message":{"content":"\#(content)"}}]}"#.utf8)
+            XCTAssertThrowsError(try ApmeJudgeChatResponse.content(data)) { error in
+                guard case ApmeJudgeOpenAI.JudgeError.outputLimit = error else {
+                    return XCTFail("Expected output limit, got \(error)")
+                }
+            }
+        }
+    }
+
+    /// `JSONSerialization` bridges JSON booleans to NSNumber, so `as? Double`
+    /// read `{"overall":true}` as a perfect 1.0 score here while Node refused
+    /// the body, and turned `{"passed":true}` into a numeric axis row in
+    /// `evals` on one daemon only.
+    func testBooleansAreNotScores() {
+        XCTAssertNil(ApmeRunner.parseJudgeJson(#"{"overall":true}"#))
+        XCTAssertNil(ApmeRunner.parseJudgeJson(#"{"overall":false,"summary":"x"}"#))
+        let parsed = ApmeRunner.parseJudgeJson(#"{"overall":0.8,"passed":true,"flag":false}"#)
+        XCTAssertEqual(parsed?.scores, ["overall": 0.8])
+    }
+
+    /// `choices` must be an ARRAY. Swift rejected an object map all along and
+    /// Node did not; the vector file now pins it for both (#286 item 4).
+    func testChoicesMustBeAnArray() {
+        let data = Data(#"{"choices":{"0":{"message":{"content":"{\"overall\":0.8}"}}}}"#.utf8)
+        XCTAssertThrowsError(try ApmeJudgeChatResponse.content(data))
+    }
+
+    /// The label is the provenance stamped onto stored eval rows, so it must
+    /// name the model that RAN. As a hardcoded constant it went on claiming
+    /// `claude-opus-4-6` after the default moved — the same cross-daemon
+    /// attribution error #286 set out to remove. And a configured id that is
+    /// not an Anthropic model is not forwarded: there is no
+    /// `resetBackendCoupledFields` on this side to wipe a leftover MLX id on a
+    /// backend switch, and this leg reports a 400 as `nil`, which is
+    /// byte-identical to "no API key found".
+    func testApiJudgeResolvesTheModelItWillActuallyCall() {
+        XCTAssertEqual(ApmeJudgeApi.resolveModel("default"), ApmeJudgeApi.defaultModel)
+        XCTAssertEqual(ApmeJudgeApi.resolveModel(""), ApmeJudgeApi.defaultModel)
+        XCTAssertEqual(ApmeJudgeApi.resolveModel("mlx-community/gemma-4-26b-a4b-it-4bit"),
+                       ApmeJudgeApi.defaultModel)
+        XCTAssertEqual(ApmeJudgeApi.resolveModel("claude-haiku-4-5"), "claude-haiku-4-5")
+        // Against a custom endpoint the substitution is off: this daemon (unlike
+        // Node) honours `endpoint`, so the leg may be pointed at an
+        // Anthropic-compatible gateway whose ids are legitimately not
+        // `claude…`-prefixed, and swapping one would bill the user for a model
+        // they did not name.
+        XCTAssertEqual(
+            ApmeJudgeApi.resolveModel("anthropic.claude-opus-4-6-v1:0", endpoint: "https://gateway.invalid/v1/messages"),
+            "anthropic.claude-opus-4-6-v1:0")
+        XCTAssertEqual(
+            ApmeJudgeApi.resolveModel("gemma-3-27b", endpoint: ApmeJudgeApi.defaultEndpoint),
+            ApmeJudgeApi.defaultModel)
+    }
+
+    /// The label is the provenance stamped onto stored eval rows, so it must
+    /// name the model that RAN — as a hardcoded constant it went on claiming
+    /// `claude-opus-4-6` after the default moved. Driven through the same
+    /// function `judge()` uses, so the assertion is on the real path rather
+    /// than on the fallback branch.
+    func testApiJudgeLabelNamesTheModelThatRan() {
+        var config = ApmeJudgeConfig()
+        config.backend = .api
+        config.model = "claude-haiku-4-5"
+        XCTAssertEqual(ApmeJudgeApi.resolvedModelForRequest(config), "claude-haiku-4-5")
+        XCTAssertEqual(ApmeJudgeApi.judgeModelLabel, "api:claude-haiku-4-5")
+
+        config.model = "mlx-community/gemma-4-26b-a4b-it-4bit"
+        XCTAssertEqual(ApmeJudgeApi.resolvedModelForRequest(config), ApmeJudgeApi.defaultModel)
+        XCTAssertEqual(ApmeJudgeApi.judgeModelLabel, "api:\(ApmeJudgeApi.defaultModel)")
+    }
+
+    /// The Anthropic leg's completion rule, replayed from the same file Vitest
+    /// replays. It is reached only through an SDK/network call, so without this
+    /// the rule had no gate on either daemon and reverting it stayed green.
+    func testApiResponseMatchesSharedVectors() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("shared/apme-judge-api-response-vectors.json")
+        let vectors = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [[String: Any]])
+        XCTAssertGreaterThanOrEqual(vectors.count, 9)
+        for vector in vectors {
+            let note = try XCTUnwrap(vector["note"] as? String)
+            let response = try XCTUnwrap(vector["response"] as? [String: Any])
+            if vector["accepted"] as? Bool == true {
+                let text = try ApmeJudgeApi.content(response)
+                XCTAssertNotNil(ApmeRunner.parseJudgeJson(text), note)
+            } else {
+                XCTAssertThrowsError(try ApmeJudgeApi.content(response), note)
             }
         }
     }

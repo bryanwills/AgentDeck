@@ -829,21 +829,13 @@ actor ApmeRunner {
     ///     ignore the "float in [0,1]" instruction).
     ///   - Requires an `overall` score — returns nil otherwise.
     static func parseJudgeJson(_ text: String) -> ApmeParsedJudge? {
-        // Grab first {...} block via a regex that matches the outermost braces.
-        guard let jsonBlock = extractFirstJsonBlock(text) else { return nil }
-        guard let data = jsonBlock.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
+        guard let obj = selectVerdictObject(text) else { return nil }
 
         var scores: [String: Double] = [:]
         for (key, value) in obj {
             if reservedFields.contains(key) { continue }
-            if let num = value as? Double {
-                scores[key] = Self.clamp01(num)
-            } else if let num = value as? Int {
-                scores[key] = Self.clamp01(Double(num))
-            }
-            // Non-numeric fields (strings, arrays, objects) are ignored.
+            // Non-numeric fields (strings, booleans, arrays, objects) are ignored.
+            if let num = Self.jsonNumber(value) { scores[key] = Self.clamp01(num) }
         }
         guard scores["overall"] != nil else { return nil }
 
@@ -864,11 +856,52 @@ actor ApmeRunner {
         )
     }
 
+    /// Numeric value of a JSON field, mirroring TS `typeof v === 'number'`.
+    /// NOT `as? Double`: `JSONSerialization` bridges JSON booleans to NSNumber,
+    /// so `{"overall":true}` read as a perfect 1.0 score on this daemon while
+    /// Node refused the body — and `{"passed":true}` became a numeric axis row
+    /// in `evals` on one daemon only.
+    private static func jsonNumber(_ value: Any?) -> Double? {
+        guard let number = value as? NSNumber else { return nil }
+        if CFGetTypeID(number) == CFBooleanGetTypeID() { return nil }
+        let d = number.doubleValue
+        return d.isFinite ? d : nil
+    }
+
+    /// The judge's verdict object, chosen by the one field that identifies a
+    /// verdict rather than by position. Mirrors `parseJudgeObject` in
+    /// bridge/src/apme/runner.ts.
+    ///
+    /// Taking the FIRST balanced block is how a local reasoning model's
+    /// scratchpad got scored instead of its answer:
+    /// `<think>{"overall":0.5}</think>` followed by the real `{"overall":0.9}`.
+    /// An unstripped thinking block is the exact shape `reasoningEffort: "none"`
+    /// exists to suppress, i.e. the models this judge chain targets. Two spans
+    /// both carrying `overall` are AMBIGUOUS and resolve to nil — a wrong score
+    /// written to `evals` is strictly worse than a skip.
+    static func selectVerdictObject(_ text: String) -> [String: Any]? {
+        var verdicts: [[String: Any]] = []
+        var from = text.startIndex
+        while let block = extractFirstJsonBlock(text, from: from) {
+            from = block.end
+            if let data = block.text.data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               Self.jsonNumber(obj["overall"]) != nil {
+                verdicts.append(obj)
+            }
+        }
+        return verdicts.count == 1 ? verdicts[0] : nil
+    }
+
     /// Extract the first balanced `{...}` block from arbitrary text.
     /// Handles the common case of models wrapping JSON in ```json fences
     /// or adding "Here is the JSON:" prefixes.
-    private static func extractFirstJsonBlock(_ text: String) -> String? {
-        guard let firstBrace = text.firstIndex(of: "{") else { return nil }
+    private static func extractFirstJsonBlock(
+        _ text: String,
+        from: String.Index? = nil
+    ) -> (text: String, end: String.Index)? {
+        let start = from ?? text.startIndex
+        guard start < text.endIndex, let firstBrace = text[start...].firstIndex(of: "{") else { return nil }
         var depth = 0
         var i = firstBrace
         var inString = false
@@ -886,7 +919,8 @@ actor ApmeRunner {
                 else if c == "}" {
                     depth -= 1
                     if depth == 0 {
-                        return String(text[firstBrace...i])
+                        let end = text.index(after: i)
+                        return (String(text[firstBrace...i]), end)
                     }
                 }
             }

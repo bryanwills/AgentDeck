@@ -288,6 +288,51 @@ export class ApmeRunner {
     return this.runningTaskIds.size;
   }
 
+  /** The backlog candidates this tick may actually feed, newest first and at
+   *  most `limit` of them.
+   *
+   *  The drain feeds exactly one task per tick, taken from the head of a query
+   *  ordered by `ended_at DESC`, and `enqueueTask` drops a parked task
+   *  silently — so a task that fails every attempt owns that head and every
+   *  tick spends its one slot on it while everything behind it starves.
+   *  Measured 2026-09-06: 156 closed tasks from 2026-08-07..23 unjudged for
+   *  two weeks, while the day's own tasks (83 of 95) were judged normally by
+   *  the live close path. The count is the tell — 217 -> 156 while the head
+   *  was still judgeable, then flat.
+   *
+   *  A truth table over `isTaskParked` rather than a loop at the call site,
+   *  because a call site that forgets the check leaves every test green while
+   *  the backlog stops moving. */
+  pickBacklogTasks<T extends { id: string }>(candidates: readonly T[], limit: number): T[] {
+    const picked: T[] = [];
+    for (const candidate of candidates) {
+      if (picked.length >= limit) break;
+      if (this.isTaskParked(candidate.id)) continue;
+      picked.push(candidate);
+    }
+    // A window in which EVERY candidate is parked is the stall this function
+    // exists to prevent, one level up: the drain silently does nothing again,
+    // and silence is what let the original bug run for two weeks. Say it, at
+    // most once per park period so a wide outage is one line, not one a tick.
+    if (picked.length === 0 && candidates.length > 0) {
+      const now = Date.now();
+      if (now - this.lastAllParkedLogAt >= TASK_EVAL_PARK_MS) {
+        this.lastAllParkedLogAt = now;
+        log(`APME task judge: all ${candidates.length} backlog candidate(s) in the window are parked — the drain is idle until a park expires (latest failure: ${this.lastTaskEvalFailure || 'unknown'})`);
+      }
+    }
+    return picked;
+  }
+
+  private lastAllParkedLogAt = 0;
+
+  /** Whether this task is parked right now, i.e. `enqueueTask` would drop it. */
+  isTaskParked(taskId: string): boolean {
+    const failed = this.taskEvalFailures.get(taskId);
+    if (!failed || failed.attempts < TASK_EVAL_MAX_ATTEMPTS) return false;
+    return Date.now() - failed.lastAt < TASK_EVAL_PARK_MS;
+  }
+
   /** One visible line per decade of parks (the 1st, 10th, 100th…): enough to
    *  see a stalled judge in the daemon log, never a line per task. */
   private noteTaskParked(taskId: string): void {
@@ -996,6 +1041,11 @@ export function effectiveJudgeModelTag(cfg: ApmeJudgeConfig): string {
   // Must stay byte-identical with Swift's `ApmeJudgeFoundationModels.judgeModelLabel`
   // so analytics queries aggregate FM evals across the Node and Swift stacks.
   if (cfg.backend === 'foundationModels') return 'foundationModels:apple-intelligence';
+  // The API leg does not necessarily call `cfg.model` — `apiJudgeModel` falls
+  // back when the configured id belongs to another backend. Stamping the
+  // configured value recorded a verdict as produced by a model that never ran.
+  // Mirrored by `ApmeJudgeApi.judgeModelLabel`.
+  if (cfg.backend === 'api') return `api:${apiJudgeModel(cfg)}`;
   return `${cfg.backend}:${cfg.model}`;
 }
 
@@ -1564,13 +1614,7 @@ async function callMlx(prompt: string, cfg: ApmeJudgeConfig): Promise<string> {
     }
   }
   if (!resp.ok) throw new Error(`MLX judge HTTP ${resp.status}`);
-  const json = await resp.json() as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }> };
-  if (json.choices?.[0]?.finish_reason === 'length') throw new Error('MLX judge reached output limit before completion');
-  const text = json.choices?.[0]?.message?.content;
-  if (typeof text !== 'string' || text.trim().length === 0) {
-    throw new Error('MLX judge returned empty content');
-  }
-  return text;
+  return judgeChatContent(await resp.json(), 'MLX');
 }
 
 function compactPromptForMlxContext(text: string, maxChars: number): string {
@@ -1667,11 +1711,7 @@ async function callOpenAICompatible(prompt: string, cfg: ApmeJudgeConfig): Promi
     resp = await send(false);
   }
   if (!resp.ok) throw new Error(`openai judge HTTP ${resp.status} (${url})`);
-  const json = await resp.json() as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }> };
-  if (json.choices?.[0]?.finish_reason === 'length') throw new Error('openai judge reached output limit before completion');
-  const text = json.choices?.[0]?.message?.content;
-  if (typeof text !== 'string' || text.trim().length === 0) throw new Error('openai judge returned empty content');
-  return text;
+  return judgeChatContent(await resp.json(), 'openai');
 }
 
 async function callOpenClaw(prompt: string, cfg: ApmeJudgeConfig): Promise<string> {
@@ -1786,8 +1826,20 @@ async function resolveFoundationModelsUrl(): Promise<string | null> {
 
 /** Default model for the opt-in Anthropic API judge when the configured
  *  `model` belongs to another backend (e.g. an MLX id left over from a
- *  backend switch). */
-const API_JUDGE_DEFAULT_MODEL = 'claude-opus-4-8';
+ *  backend switch). Mirrored by `ApmeJudgeApi.swift`: the two daemons read the
+ *  same `settings.json` and are the same judge, so a user who opted into the
+ *  API leg without naming a model must not get a different model depending on
+ *  which daemon happens to hold the port (Node said `claude-opus-4-8`, Swift
+ *  `claude-opus-4-6`, until #286). */
+const API_JUDGE_DEFAULT_MODEL = 'claude-opus-5';
+
+/** Output cap for the API leg, mirrored by `ApmeJudgeApi.swift`. Verdict
+ *  bodies measure p99 ~1,025 chars (~335 tokens), so this is headroom rather
+ *  than a budget — but adaptive thinking spends against the same cap, and
+ *  `max_tokens` is a ceiling, not a charge: only tokens actually produced are
+ *  billed. Swift sent 1,024, so the same task judged on the same settings was
+ *  cut 8x earlier there. */
+const API_JUDGE_MAX_TOKENS = 8192;
 
 function apiJudgeModel(cfg: ApmeJudgeConfig): string {
   return cfg.model && cfg.model.startsWith('claude') ? cfg.model : API_JUDGE_DEFAULT_MODEL;
@@ -1806,37 +1858,198 @@ async function callApi(prompt: string, cfg: ApmeJudgeConfig): Promise<string> {
   });
   const response = await client.messages.create({
     model: apiJudgeModel(cfg),
-    max_tokens: 8192,
+    max_tokens: API_JUDGE_MAX_TOKENS,
     thinking: { type: 'adaptive' },
     messages: [{ role: 'user', content: prompt }],
   });
+  return apiJudgeText(response);
+}
+
+/** The Anthropic-shaped counterpart of `judgeChatContent`, and the same rule
+ *  under Anthropic's spelling: a refusal is not a verdict, and a body cut at
+ *  `max_tokens` is one only when its JSON object closed. The text blocks are
+ *  joined first because the object can close in one block and the cut land in
+ *  the next.
+ *
+ *  Pure and exported so the rule has a gate: it is reached only through the
+ *  Anthropic SDK, so nothing exercised it and reverting either line left both
+ *  suites green. Mirrored by `ApmeJudgeApi.content`; behavior is pinned by
+ *  `shared/apme-judge-api-response-vectors.json`, which both suites replay. */
+export function apiJudgeText(response: {
+  stop_reason?: string | null;
+  content?: Array<{ type?: string; text?: string }>;
+}): string {
+  // `content` must be an ARRAY — the same hole just closed for `choices` in
+  // `judgeChatContent`. Without the guard a string or object map throws a
+  // TypeError instead of a judge error, while Swift's `as? [[String: Any]] ?? []`
+  // degrades to empty and raises a proper one.
+  const blocks = Array.isArray(response.content) ? response.content : [];
+  const text = blocks
+    .filter((b) => b?.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text as string)
+    .join('\n')
+    .trim();
   if (response.stop_reason === 'refusal') {
     throw new Error('API judge refused the request (stop_reason=refusal)');
   }
-  const text = response.content
-    .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
-    .map((b) => b.text)
-    .join('\n')
-    .trim();
+  if (response.stop_reason === 'max_tokens') {
+    throw new Error('API judge reached output limit before completion (stop_reason=max_tokens)');
+  }
   if (!text) throw new Error(`API judge returned no text (stop_reason=${response.stop_reason})`);
   return text;
 }
 
-export function parseJudgeJson(text: string): ParsedJudge | null {
-  // Models often wrap JSON in prose or code fences — grab the first {...} block.
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) return null;
-  let obj: Record<string, unknown>;
-  try { obj = JSON.parse(match[0]); }
-  catch {
-    // Local judges occasionally emit otherwise-valid JSON with a comma before
-    // `}`/`]`, or omit the opening quote of an auxiliary object key while
-    // retaining its closing quote (both observed with Gemma 4 on long
-    // task_rollup prompts). Repair only structural text outside strings so
-    // evidence content remains byte-for-byte intact.
-    try { obj = JSON.parse(repairJudgeJson(match[0])); }
-    catch { return null; }
+/**
+ * Shared MLX / OpenAI-compatible chat response gate.
+ *
+ * Mirrored by Swift `ApmeJudgeChatResponse`; the cases both daemons must agree
+ * on live in `shared/apme-judge-response-vectors.json`, which both suites
+ * replay. Three rules, and the ORDER of the first two matters because a
+ * truncated body is still a non-empty one:
+ *
+ *  - `choices` must be a non-empty ARRAY. Indexing `json.choices?.[0]` happily
+ *    reads `{"choices":{"0":{…}}}`, which Swift's `as? [[String: Any]]` cast
+ *    rejects — the two daemons disagreed on that shape until #286.
+ *  - Content must be a non-empty string.
+ *  - `finish_reason: "length"` is rejected, full stop. #285's rule, restored
+ *    after an exemption for "the object closed, so the verdict finished" was
+ *    tried and removed. It produced a defect in three consecutive review
+ *    rounds — first admitting a reasoning model's scratchpad when the real
+ *    verdict was cut, then refusing complete verdicts whose trailing prose
+ *    held an unmatched brace — because brace topology cannot actually tell
+ *    whether the model finished. It also had no measured beneficiary: the one
+ *    cut mode observed on this fleet is a repetition loop INSIDE the `summary`
+ *    string, where depth can never return to zero, so the exemption and this
+ *    rule agree on every real body seen. #286 item 3 lists "keep rejecting and
+ *    alert on the rate" among its options; the park log names this failure, and
+ *    a re-attempt clears it two times in three (measured over the 24 parked
+ *    tasks, 2026-09-06).
+ */
+export function judgeChatContent(payload: unknown, label: string): string {
+  const choices = (payload as { choices?: unknown } | null)?.choices;
+  if (!Array.isArray(choices) || choices.length === 0) {
+    throw new Error(`${label} judge returned no choices`);
   }
+  const first = choices[0] as { message?: { content?: unknown } | null; finish_reason?: unknown } | null;
+  const content = first?.message?.content;
+  if (typeof content !== 'string' || content.trim().length === 0) {
+    throw new Error(`${label} judge returned empty content`);
+  }
+  if (first?.finish_reason === 'length') {
+    throw new Error(`${label} judge reached output limit before completion`);
+  }
+  return content;
+}
+
+/** Every top-level balanced `{…}` span in `text`, then the greedy
+ *  first-`{`-to-last-`}` span when it differs from all of them.
+ *
+ *  Balanced first, so a verdict followed by prose containing a brace reads the
+ *  same on both daemons. ALL of them, not just the first, because the first is
+ *  not necessarily the verdict — a local reasoning model emits a scratchpad
+ *  object before the real one. The greedy span last, because the balanced
+ *  scanner is string-aware and `repairJudgeJson` exists for bodies whose
+ *  quoting is itself broken: a key that lost its opening quote desyncs any such
+ *  scanner, and that body used to parse. */
+function jsonBlockSpans(text: string): string[] {
+  const out: string[] = [];
+  let from = 0;
+  for (;;) {
+    const block = extractFirstJsonBlock(text, from);
+    if (block === null) break;
+    out.push(block.text);
+    from = block.end;
+  }
+  const greedy = text.match(/\{[\s\S]*\}/);
+  if (greedy && !out.includes(greedy[0])) out.push(greedy[0]);
+  return out;
+}
+
+function strictParseObject(block: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(block) as unknown;
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch { return null; }
+}
+
+function parseOrRepairObject(block: string): Record<string, unknown> | null {
+  return strictParseObject(block) ?? strictParseObject(repairJudgeJson(block));
+}
+
+/** The judge's verdict object, chosen by the one field that identifies a
+ *  verdict rather than by position.
+ *
+ *  Taking the first span that merely PARSES is how the balanced scan turned a
+ *  loud failure into a silently wrong score: `<think>{"overall":0.5}</think>`
+ *  followed by the real `{"overall":0.9}` scored the scratchpad. An unstripped
+ *  thinking block is the exact shape `reasoningEffort: "none"` exists to
+ *  suppress, i.e. the local models this judge chain targets.
+ *
+ *  Two spans both carrying `overall` are AMBIGUOUS and resolve to null — the
+ *  loud "unparseable verdict" the greedy match produced before, and the right
+ *  answer, because a wrong score written to `evals` is strictly worse than a
+ *  skip. */
+function parseJudgeObject(text: string): Record<string, unknown> | null {
+  const parsed: Record<string, unknown>[] = [];
+  for (const block of jsonBlockSpans(text)) {
+    const obj = parseOrRepairObject(block);
+    if (obj) parsed.push(obj);
+  }
+  const verdicts = parsed.filter((o) => typeof o.overall === 'number' && isFinite(o.overall as number));
+  if (verdicts.length === 1) return verdicts[0];
+  if (verdicts.length > 1) return null;
+  return null;
+}
+
+/** The first BALANCED `{…}` block, mirroring Swift `extractFirstJsonBlock`.
+ *
+ *  This used to be a greedy `/\{[\s\S]*\}/`, which spans the first `{` to the
+ *  LAST `}` in the body — so a verdict followed by any prose containing a brace
+ *  parsed here and not on the other daemon, whose scanner stops at the object's
+ *  own closing brace. That divergence became load-bearing once a cut body is
+ *  accepted when its object closed: text after the closing brace is exactly
+ *  what a `finish_reason: "length"` body has, and a model that keeps talking
+ *  past the verdict mentioning a brace is routine. Node rejected it as cut
+ *  while Swift accepted and scored it.
+ *
+ *  Braces inside strings do not count, so an escaped brace in a `summary`
+ *  cannot end the block early. */
+function extractFirstJsonBlock(text: string, from = 0): { text: string; end: number } | null {
+  const start = text.indexOf('{', from);
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const char = text[i];
+    if (escaped) { escaped = false; continue; }
+    if (inString) {
+      if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === '{') depth++;
+    else if (char === '}') {
+      depth--;
+      if (depth === 0) return { text: text.slice(start, i + 1), end: i + 1 };
+    }
+  }
+  return null;
+}
+
+export function parseJudgeJson(text: string): ParsedJudge | null {
+  // Models often wrap JSON in prose or code fences, emit a comma before `}`/`]`,
+  // or omit the opening quote of an auxiliary object key while retaining its
+  // closing quote (both observed with Gemma 4 on long task_rollup prompts).
+  // `parseJudgeObject` handles the extraction and the repair — and is shared
+  // with the transport gate so the two cannot disagree about whether this body
+  // holds a verdict. Repair only touches structural text outside strings, so
+  // evidence content stays byte-for-byte intact.
+  const obj = parseJudgeObject(text);
+  if (obj === null) return null;
 
   // Accept any numeric axis — category-specific rubrics define their own
   // (conversation: accuracy/helpfulness/conciseness; research: thoroughness/…;

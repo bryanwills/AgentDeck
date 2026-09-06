@@ -108,7 +108,7 @@ enum ApmeJudgeOpenAI {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let k = config.apiKey, !k.isEmpty { request.setValue("Bearer \(k)", forHTTPHeaderField: "Authorization") }
         request.timeoutInterval = 90
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": model,
             "messages": [
                 ["role": "system", "content": "You are an exacting code evaluator. Reply with strict JSON only."],
@@ -117,6 +117,15 @@ enum ApmeJudgeOpenAI {
             "temperature": 0,
             "max_tokens": 1024,
         ]
+        // `apme.judge.reasoningEffort` was Node-only: both daemons read the
+        // same settings.json and call the same user-configured endpoint, so a
+        // user who set `none` to stop a local model emitting thinking tokens
+        // got it obeyed on one daemon and ignored on the other — and the
+        // ignored request then spent the 1,024-token cap on thinking and came
+        // back `finish_reason: "length"`.
+        if let effort = config.reasoningEffort, !effort.isEmpty {
+            body["reasoning_effort"] = effort
+        }
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         do {
@@ -131,21 +140,26 @@ enum ApmeJudgeOpenAI {
         }
     }
 }
-/// Shared MLX/OpenAI response gate. A complete-looking JSON object is still
-/// not a verdict when the server says generation hit the output limit.
-/// Behavior is pinned in shared/apme-judge-response-vectors.json for both daemons.
+/// Shared MLX/OpenAI response gate: `choices` must be a non-empty ARRAY, the
+/// content a non-empty string, and a body the server says it cut must still
+/// hold a JSON object that closed. Mirrors `judgeChatContent` in
+/// bridge/src/apme/runner.ts; behavior is pinned in
+/// shared/apme-judge-response-vectors.json, which both suites replay.
 enum ApmeJudgeChatResponse {
     static func content(_ data: Data) throws -> String {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = json["choices"] as? [[String: Any]],
               let first = choices.first
         else { throw ApmeJudgeOpenAI.JudgeError.empty }
-        if first["finish_reason"] as? String == "length" {
-            throw ApmeJudgeOpenAI.JudgeError.outputLimit
-        }
         guard let content = (first["message"] as? [String: Any])?["content"] as? String,
               !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { throw ApmeJudgeOpenAI.JudgeError.empty }
+        // A cut response is not a verdict. See `judgeChatContent` in
+        // bridge/src/apme/runner.ts for why the "unless its object closed"
+        // exemption was tried and removed.
+        if first["finish_reason"] as? String == "length" {
+            throw ApmeJudgeOpenAI.JudgeError.outputLimit
+        }
         return content
     }
 }

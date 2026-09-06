@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import vectors from '../../../shared/apme-judge-response-vectors.json';
+import apiVectors from '../../../shared/apme-judge-api-response-vectors.json';
 import { ApmeStore } from '../apme/store.js';
-import { ApmeRunner, callJudgeWithMeta } from '../apme/runner.js';
+import { ApmeRunner, callJudgeWithMeta, parseJudgeJson, apiJudgeText } from '../apme/runner.js';
 import { ApmeCollector } from '../apme/collector.js';
 import { DEFAULT_APME_CONFIG } from '../apme/settings.js';
 
@@ -78,9 +79,12 @@ describe('Ollama-compatible task judge persistence and recovery', () => {
           if (kind === 'empty') return new Response(JSON.stringify({ choices: [{ message: { content: '  ' } }] }));
           if (kind === 'http') return new Response('unavailable', { status: 503 });
           if (kind === 'json') return new Response(JSON.stringify({ choices: [{ message: { content: 'not JSON' } }] }));
+          // Cut mid-object — the only shape the output-limit rule still
+          // refuses. A `length` response whose JSON closed is a finished
+          // verdict and is now accepted (#286 item 3).
           if (kind === 'length')
             return new Response(
-              JSON.stringify({ choices: [{ message: { content: answer }, finish_reason: 'length' }] }),
+              JSON.stringify({ choices: [{ message: { content: answer.slice(0, 30) }, finish_reason: 'length' }] }),
             );
           throw new DOMException('request timed out', 'TimeoutError');
         })
@@ -127,24 +131,44 @@ describe('Ollama-compatible task judge persistence and recovery', () => {
 
 describe('incomplete judge response', () => {
   afterEach(() => vi.unstubAllGlobals());
-  it.each(['mlx', 'openai'] as const)('%s rejects a length-limited JSON response', async (backend) => {
+  const call = (backend: 'mlx' | 'openai') =>
+    callJudgeWithMeta('judge', {
+      ...DEFAULT_APME_CONFIG.judge,
+      backend,
+      model: 'gemma-test',
+      endpoint: 'http://127.0.0.1:8800/v1/chat/completions',
+      fallbackToMlx: false,
+      fallbackToFoundationModels: false,
+    });
+  const serve = (content: string, finish_reason: string) =>
     vi.stubGlobal(
       'fetch',
-      vi.fn(
-        async () =>
-          new Response(JSON.stringify({ choices: [{ message: { content: answer }, finish_reason: 'length' }] })),
-      ),
+      vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason }] }))),
     );
-    await expect(
-      callJudgeWithMeta('judge', {
-        ...DEFAULT_APME_CONFIG.judge,
-        backend,
-        model: 'gemma-test',
-        endpoint: 'http://127.0.0.1:8800/v1/chat/completions',
-        fallbackToMlx: false,
-        fallbackToFoundationModels: false,
-      }),
-    ).rejects.toThrow(/output limit/);
+
+  it.each(['mlx', 'openai'] as const)('%s rejects a response cut mid-object', async (backend) => {
+    serve(answer.slice(0, 30), 'length');
+    await expect(call(backend)).rejects.toThrow(/output limit/);
+  });
+
+  // A cut response is not a verdict, whatever the body looks like. The
+  // exemption for "its object closed" was tried and removed: brace topology
+  // cannot tell whether the model finished, and it had no measured beneficiary
+  // — the one cut mode observed on this fleet is a repetition loop inside the
+  // summary string, where depth never returns to zero.
+  it.each(['mlx', 'openai'] as const)('%s rejects a cut that landed after the object closed', async (backend) => {
+    serve(`${answer} …and then the model kept talking`, 'length');
+    await expect(call(backend)).rejects.toThrow(/output limit/);
+  });
+
+  // Node indexed `json.choices?.[0]`, which reads this happily; Swift's
+  // `as? [[String: Any]]` cast rejected it. Nothing pinned the disagreement.
+  it.each(['mlx', 'openai'] as const)('%s rejects choices that is not an array', async (backend) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ choices: { 0: { message: { content: answer } } } }))),
+    );
+    await expect(call(backend)).rejects.toThrow(/no choices/);
   });
 });
 
@@ -164,8 +188,34 @@ describe.each(['mlx', 'openai'] as const)('%s shared response contract', (backen
       fallbackToMlx: false,
       fallbackToFoundationModels: false,
     });
-    if (vector.accepted) await expect(result).resolves.toHaveProperty('text');
-    else await expect(result).rejects.toThrow();
+    if (vector.accepted) {
+      // `accepted` is the transport gate; `verdict` (defaulting to it) is
+      // whether the parser must then produce one. Both are asserted here and in
+      // macOS ApmeParseJudgeTests, so the vectors pin both daemons end to end
+      // rather than one at the transport and one at the parser.
+      const { text } = await result;
+      const wantsVerdict = (vector as { verdict?: boolean }).verdict ?? true;
+      if (wantsVerdict) expect(parseJudgeJson(text)).not.toBeNull();
+      else expect(parseJudgeJson(text)).toBeNull();
+    } else {
+      await expect(result).rejects.toThrow();
+    }
+  });
+});
+
+// The Anthropic leg is reached only through the SDK, so nothing exercised its
+// completion rule and reverting either line left both suites green. These exact
+// envelopes are also replayed by macOS ApmeParseJudgeTests.
+describe('Anthropic API response contract', () => {
+  it.each(apiVectors)('$note', (vector) => {
+    if (vector.accepted) {
+      expect(parseJudgeJson(apiJudgeText(vector.response))).not.toBeNull();
+    } else {
+      // The MESSAGE, not merely that something threw: without the
+      // `Array.isArray` guard a non-array `content` throws a TypeError, and a
+      // bare `.toThrow()` accepts that — the guard could be reverted green.
+      expect(() => apiJudgeText(vector.response)).toThrow(/refused|output limit|returned no text/);
+    }
   });
 });
 
@@ -186,5 +236,88 @@ describe('optional OpenAI-compatible reasoning control', () => {
     const request = JSON.parse((fetcher.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
     if (reasoningEffort === undefined) expect(request).not.toHaveProperty('reasoning_effort');
     else expect(request.reasoning_effort).toBe(reasoningEffort);
+  });
+});
+
+// The backlog drain feeds ONE task per tick, taken from a query ordered by
+// `ended_at DESC`. A task whose judge call fails every attempt therefore owns
+// that head, and `enqueueTask` drops a parked task silently — so every tick
+// spent its one slot on it and everything behind it starved. Measured
+// 2026-09-06: 156 closed tasks from 2026-08-07..23 unjudged for two weeks
+// while the day's own tasks were judged normally by the live close path.
+describe('task judge backlog drain', () => {
+  let dir: string;
+  let store: ApmeStore;
+  let runner: ApmeRunner;
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'ad-drain-test-'));
+    store = new ApmeStore(join(dir, 'apme.sqlite'));
+    expect(await store.init()).toBe(true);
+    runner = new ApmeRunner(store);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function poison(taskId: string) {
+    // Two failed attempts is the park threshold; a judge that answers nothing
+    // parseable is the cheapest way to reach it.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'not JSON' } }] }))));
+    const collector = new ApmeCollector(store);
+    const runId = collector.openRun({ sessionId: taskId, agentType: 'claude-code', projectName: 'fixture' })!;
+    collector.ingestHook(taskId, 'UserPromptSubmit', {
+      prompt: 'Add a regression test for missing configuration files.',
+    });
+    collector.setTurnResponse(
+      taskId,
+      'Added and ran the regression test. The missing-file path now returns the default configuration.',
+    );
+    collector.closeTaskExternal(taskId, 'manual');
+    const id = store.listTasksForRun(runId)[0].id;
+    runner._setConfig({
+      ...DEFAULT_APME_CONFIG,
+      enabled: true,
+      deterministic: { enabled: false, timeoutSec: 1, commands: {} },
+      judge: { backend: 'openai', model: 'm', endpoint: 'http://127.0.0.1:11434/v1', fallbackToMlx: false, fallbackToFoundationModels: false },
+    });
+    for (let i = 0; i < 2; i++) {
+      runner.enqueueTask({ runId, taskId: id });
+      await vi.waitFor(() => expect(runner.inFlightTaskEvals).toBe(0));
+    }
+    return id;
+  }
+
+  it('skips the parked head instead of spending the tick on it', async () => {
+    const parked = await poison('poison-session');
+    expect(runner.isTaskParked(parked)).toBe(true);
+    const backlog = [{ id: parked }, { id: 'next-in-line' }, { id: 'after-that' }];
+    expect(runner.pickBacklogTasks(backlog, 1)).toEqual([{ id: 'next-in-line' }]);
+  });
+
+  it('still feeds one task per tick', () => {
+    const backlog = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+    expect(runner.pickBacklogTasks(backlog, 1)).toEqual([{ id: 'a' }]);
+  });
+
+  it('feeds nothing when every candidate is parked, and says so once', async () => {
+    const parked = await poison('poison-session');
+    const lines: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: any) => {
+      lines.push(String(chunk));
+      return true;
+    });
+    try {
+      expect(runner.pickBacklogTasks([{ id: parked }], 1)).toEqual([]);
+      // Silence is what let the original stall run for two weeks — but a line
+      // per 30s tick is its own kind of unreadable, so it is throttled.
+      expect(runner.pickBacklogTasks([{ id: parked }], 1)).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+    const said = lines.filter((l) => l.includes('backlog candidate(s) in the window are parked'));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain('all 1 backlog candidate(s)');
   });
 });
