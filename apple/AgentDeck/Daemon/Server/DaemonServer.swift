@@ -1128,6 +1128,11 @@ final class DaemonServer {
         var burstLabels: [String] = []
     }
     private var subagentCensus: [String: SubagentCensus] = [:]
+    /// Cross-session coordination (spawned workers, peer messages, background
+    /// jobs) — the second census axis beside `subagentCensus`. Fed by the hook
+    /// pid header + hook payloads, reconciled against `sysctl` every 5 s.
+    private let coordinationTracker = CoordinationTracker()
+    private var coordinationTickTask: Task<Void, Never>?
     private var subagentBurstSeq = 0
     /// Children starting within this window fold into ONE dispatch row. Per
     /// child would be honest and unreadable: a buffer shared by every session
@@ -3452,6 +3457,9 @@ final class DaemonServer {
             // sending check). See `daemon-entry-dict-roundtrip` memory.
             let rawName = String(request.path.dropFirst("/hooks/".count))
             let bodyData = request.body ?? Data()
+            // `X-AgentDeck-Pid: $PPID` — the posting shell's parent, i.e. the
+            // agent process. The only session→process link this daemon has.
+            let hookPid = Int(request.headers["x-agentdeck-pid"] ?? "")
             guard let self else { return .json(["received": true]) }
             if rawName == "PreToolUse" {
                 // Steering channel (mirror of the Node daemon): the response may
@@ -3465,19 +3473,20 @@ final class DaemonServer {
                 // (removed 2026-05 for false attention) must never come back.
                 // handleHookPost runs inline (not fire-and-forget) so the gate's
                 // awaiting overlay writes AFTER the tool_start state update.
-                await self.handleHookPost(rawName: rawName, body: bodyData)
+                await self.handleHookPost(rawName: rawName, body: bodyData, pid: hookPid)
                 return await self.steerPreToolUse(body: bodyData)
             }
             if rawName == "Stop" {
                 // Turn-end directive queue: empty body ends the turn normally;
                 // a queued deck command returns {decision:"block", reason} so
                 // Claude continues with it. Ordered inline like PreToolUse.
-                await self.handleHookPost(rawName: rawName, body: bodyData)
+                await self.handleHookPost(rawName: rawName, body: bodyData, pid: hookPid)
                 return await self.steerStop(body: bodyData)
             }
-            Task { [weak self] in await self?.handleHookPost(rawName: rawName, body: bodyData) }
+            Task { [weak self] in await self?.handleHookPost(rawName: rawName, body: bodyData, pid: hookPid) }
             return .json(["received": true])
         }
+        startCoordinationTick()
 
         // OpenCode observer-plugin steering: the plugin long-polls here and
         // executes returned commands via its in-process SDK client (abort /
@@ -4847,6 +4856,66 @@ final class DaemonServer {
     // MARK: - Hook Events
 
     /// Collapse child/team lifecycle into existing Timeline row types.
+    /// Cross-session coordination evidence a hook carries on its own. Mirrors
+    /// the hook half of bridge/src/coordination-evidence.ts: the receiver's
+    /// `<cross-session-message>` envelope (sender pid → session through the
+    /// pushed-session table) and the sender's `SendMessage` tool input.
+    private func noteCoordinationEvidence(event: String, json: [String: Any], sessionId: String?) {
+        guard let sid = sessionId else { return }
+        if event == "session_end" { coordinationTracker.forget(sessionId: sid); return }
+        if let pid = json["agentdeck_pid"] as? Int {
+            coordinationTracker.registerPid(sessionId: sid, pid: pid, processes: lastProcessTable)
+        }
+        // Raw hook names: Claude posts `UserPromptSubmit` / `PostToolUse`, the
+        // agent-neutral observers post `*_user_prompt_submit` / `*_tool_end`.
+        let isPrompt = event == "UserPromptSubmit" || event.hasSuffix("user_prompt_submit")
+        let isToolEnd = event == "PostToolUse" || event.hasSuffix("tool_end")
+        var relation: CoordinationRelation?
+        if isPrompt, let prompt = json["prompt"] as? String {
+            relation = coordinationTracker.noteMessageIn(sessionId: sid, prompt: prompt)
+        } else if isToolEnd {
+            relation = coordinationTracker.noteToolCall(
+                sessionId: sid, toolName: json["tool_name"] as? String, toolInput: json["tool_input"] as? [String: Any])
+        }
+        if let relation {
+            persistRelation(relation)
+            broadcastSessionsList()
+        }
+    }
+
+    private func persistRelation(_ r: CoordinationRelation) {
+        apmeCollector?.noteRelation(
+            sessionId: r.sessionId, relation: r.relation, direction: r.direction, phase: r.phase,
+            peerSessionId: r.peerSessionId, peerName: r.peerName, evidence: r.evidence, detail: r.detail,
+            ts: r.ts, key: r.key)
+    }
+
+    /// The process table the last tick read; reused by `registerPid` so a hook
+    /// arriving between ticks can still walk a wrapper shell up to its agent.
+    private var lastProcessTable: [ProcessEnumerator.ProcessRow] = []
+
+    /// Driven by its own timer, never by an observer edge: a background job
+    /// appearing or a spawned worker exiting changes the process table
+    /// without changing anything a session observer would notice. `sysctl`
+    /// runs off the actor; the reconcile runs on it.
+    private func startCoordinationTick() {
+        coordinationTickTask?.cancel()
+        coordinationTickTask = Task { @DaemonActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard let self else { return }
+                let table = await Task.detached(priority: .utility) { ProcessEnumerator.processTable() }.value
+                self.lastProcessTable = table
+                let peers = self.coordinationTracker.mergePeers([])
+                guard !peers.isEmpty else { continue }
+                let rels = self.coordinationTracker.observe(table, peers: peers)
+                guard !rels.isEmpty else { continue }
+                for r in rels { self.persistRelation(r) }
+                self.broadcastSessionsList()
+            }
+        }
+    }
+
     /// Returning true means the caller must stop: child hooks are never parent
     /// session state, approval, command, or APME input.
     private func handleSubagentTimelineHook(
@@ -4959,10 +5028,16 @@ final class DaemonServer {
         if event == "task_completed" {
             let subject = clean(json["task_subject"]) ?? clean(json["task_description"])
             let summary = subject.flatMap(TimelineSummarizer.extractTopicHint) ?? subject ?? "Completed"
+            // A teammate name is the one thing that makes this a TEAM event;
+            // the ordinary TaskCreate/TaskUpdate checklist carries none, and
+            // calling that "Team Subagent" invented a worker (2026-09-06: six
+            // finished "Subagent" branches on a session that ran no children).
+            let teammate = clean(json["teammate_name"]).map { String($0.prefix(28)) }
+            let taskLabel = teammate.map { "Team \($0)" } ?? "Task done"
             var entry = DaemonTimelineEntry(
                 ts: now,
                 type: "tool_resolved",
-                raw: "Team \(label) · \(String(summary.prefix(96)))",
+                raw: "\(taskLabel) · \(String(summary.prefix(96)))",
                 detail: nil,
                 approvalId: nil,
                 status: nil,
@@ -4975,13 +5050,13 @@ final class DaemonServer {
             entry.endedAt = now
             entry.summaryKind = subject == nil ? "none" : "heuristic"
             await timelineStore.add(entry, bypassSuppression: true)
-            apmeCollector?.noteSubagentLifecycle(
+            // Observation-only, as an `info` annotation — never a `subagent`
+            // completion the collaboration lens would draw as a child branch.
+            apmeCollector?.noteInfo(
                 sessionId: sid,
-                id: clean(json["task_id"]) ?? "team:\(label):\(Int(now))",
-                name: label,
-                phase: "completed",
-                ts: Int(now),
-                summary: summary
+                label: teammate == nil ? "task_completed" : "team_task_completed",
+                detail: summary,
+                ts: Int(now)
             )
             broadcastRaw(["type": "timeline_event", "entry": claudeCodeEntryDict(entry)])
             return true
@@ -5669,6 +5744,11 @@ final class DaemonServer {
         if !apmeHandledEarly, let hook = normalizedApmeHook {
             apmeCollector?.handleHook(event: hook.event, data: hook.payload)
         }
+        // Coordination evidence carried BY the hook itself (the Node daemon's
+        // `CoordinationTracker` hook half): a received cross-session envelope
+        // and a SendMessage call. Process-table evidence (spawned workers,
+        // background jobs) is Node-only — the sandboxed daemon has no ps.
+        noteCoordinationEvidence(event: event, json: json, sessionId: sessionId)
 
         // Attribute the next state_update + timeline entries to the session
         // that fired this hook: remember the sessionId, and mirror the
@@ -7705,9 +7785,10 @@ final class DaemonServer {
     /// Generic hook entry: deserialize the body and dispatch. All events
     /// (including PreToolUse) route here; the daemon no longer holds PreToolUse
     /// for a device gate.
-    private func handleHookPost(rawName: String, body: Data) async {
+    private func handleHookPost(rawName: String, body: Data, pid: Int? = nil) async {
         var json = (try? JSONSerialization.jsonObject(with: body) as? [String: Any]) ?? [:]
         json["event"] = Self.mapHookEventName(rawName)
+        if let pid, pid > 1, json["agentdeck_pid"] == nil { json["agentdeck_pid"] = pid }
         await handleHookEvent(json)
     }
 
@@ -10247,6 +10328,9 @@ final class DaemonServer {
         // client that merges retain-on-absent.
         if let census = subagentSummary(for: ObservedAgentRules.rawSessionId(s.id)) {
             d["subagents"] = census
+        }
+        if let coord = coordinationTracker.summary(sessionId: ObservedAgentRules.rawSessionId(s.id)) {
+            d["coordination"] = coord.dictionary
         }
         if let cm = s.controlMode {
             d["controlMode"] = cm

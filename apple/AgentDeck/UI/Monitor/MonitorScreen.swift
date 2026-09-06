@@ -16,6 +16,7 @@ struct MonitorScreen: View {
     #if os(macOS)
     @EnvironmentObject private var daemonService: DaemonService
     @Environment(\.openWindow) private var openWindow
+    @AppStorage("dashboardCollaborationEnabled") private var collaborationEnabled = false
     #endif
 
     @State private var terrariumState = TerrariumState()
@@ -91,6 +92,17 @@ struct MonitorScreen: View {
             ))
             #if os(macOS)
             .modifier(KeyboardShortcutsModifier(stateHolder: stateHolder))
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Picker("Dashboard view", selection: $collaborationEnabled) {
+                        Text("Habitat").tag(false)
+                        Text("Collaboration · Beta").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 250)
+                    .accessibilityIdentifier("dashboard-collaboration-switch")
+                }
+            }
             #endif
     }
 
