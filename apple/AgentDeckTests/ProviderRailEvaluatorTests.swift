@@ -61,6 +61,86 @@ final class ProviderRailEvaluatorTests: XCTestCase {
         XCTAssertNil(row.subtitle)
     }
 
+    func testClaudeExpiredUsageExplainsMissingGaugeWithoutClaimingSessionFailure() {
+        var s = DashboardState()
+        s.oauthConnected = true
+        s.usageStale = true
+        s.tokenStatus = "expired"
+        let row = ProviderRailEvaluator.claude(state: s, hooksInstalled: true)
+        XCTAssertEqual(row.status, .ok)
+        XCTAssertEqual(row.subtitle, "Usage authorization expired")
+        s.usageStale = false
+        s.tokenStatus = "valid"
+        XCTAssertNil(ProviderRailEvaluator.claude(state: s, hooksInstalled: true).subtitle)
+    }
+
+    @MainActor
+    func testUsageWireReasonIsRetainedAndClearedAfterRecoveryAndOwnershipChange() {
+        let holder = AgentStateHolder()
+        var expired = UsageEvent(type: "usage_update")
+        expired.usageStale = true
+        expired.tokenStatus = "expired"
+        expired.oauthConnected = true
+        holder.handleEvent(.usageUpdate(expired))
+        XCTAssertEqual(holder.state.claudeUsageIssue, "Usage authorization expired")
+        var partial = UsageEvent(type: "usage_update")
+        partial.inputTokens = 12
+        holder.handleEvent(.usageUpdate(partial))
+        XCTAssertEqual(holder.state.tokenStatus, "expired")
+        var fresh = UsageEvent(type: "usage_update")
+        fresh.usageStale = false
+        fresh.fiveHourPercent = 12
+        holder.handleEvent(.usageUpdate(fresh))
+        XCTAssertNil(holder.state.claudeUsageIssue)
+        XCTAssertNil(holder.state.tokenStatus, "older fresh producers must also clear auth errors")
+        holder.handleEvent(.usageUpdate(expired))
+        fresh.usageStale = nil // old producers omit the negative flag
+        holder.handleEvent(.usageUpdate(fresh))
+        XCTAssertNil(holder.state.tokenStatus)
+        var unavailable = UsageEvent(type: "usage_update")
+        unavailable.usageStale = true
+        holder.handleEvent(.usageUpdate(unavailable))
+        XCTAssertNil(holder.state.claudeUsageIssue,
+                     "a stale frame with no explicit expiry is 'no numbers', not a failure")
+        holder.handleEvent(.usageUpdate(expired))
+        holder.clearRelayedUsageState()
+        XCTAssertNil(holder.state.tokenStatus)
+        XCTAssertNil(holder.state.claudeUsageIssue)
+    }
+
+    /// The standalone App Store daemon emits exactly one shape: it never reads
+    /// Claude's OAuth entry, so `tokenStatus` is always `unknown` and
+    /// `usageStale` always true, while `effectiveOauthConnected()` reports true
+    /// as soon as any claude-code session is cached. That trio must stay
+    /// silent — a permanent "usage broken" line for every ordinary standalone
+    /// user is the failure this pins (CLAUDE.md § App Store build invariants).
+    func testStandaloneDaemonShapeNeverClaimsAQuotaFailure() {
+        var s = DashboardState()
+        s.usageStale = true
+        s.tokenStatus = "unknown"
+        s.oauthConnected = true
+        XCTAssertNil(s.claudeUsageIssue)
+        XCTAssertNil(s.claudeUsageBadge)
+        XCTAssertNil(ProviderRailEvaluator.claude(state: s, hooksInstalled: true).subtitle)
+
+        // An API-key / off-harness install legitimately has no OAuth credential.
+        s.tokenStatus = "missing"
+        s.oauthConnected = false
+        XCTAssertNil(s.claudeUsageIssue)
+        XCTAssertEqual(ProviderRailEvaluator.claude(state: s, hooksInstalled: false).subtitle,
+                       "Not connected",
+                       "no connection outranks a usage sentence")
+
+        // Only an explicit expiry — which only the Node daemon can produce —
+        // is a failure claim.
+        s.tokenStatus = "expired"
+        s.oauthConnected = true
+        XCTAssertEqual(s.claudeUsageIssue, "Usage authorization expired")
+        XCTAssertEqual(s.claudeUsageBadge, "Claude auth expired")
+        s.usageStale = false
+        XCTAssertNil(s.claudeUsageIssue, "fresh numbers retract the reason")
+    }
+
     // MARK: - OpenClaw (presence-driven rail — SSOT)
     //
     // The rail evaluator gates on the emitted OpenClaw SESSION (the daemon
