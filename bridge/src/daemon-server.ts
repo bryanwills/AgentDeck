@@ -243,7 +243,7 @@ import {
   describeDaemonPosture,
   resolveDaemonPosture,
 } from './network-posture.js';
-import { esp32ConnectionCount, getESP32DeviceInfo, onESP32Message, sendAuthProvisionToAll, sendWifiProvision, sendWifiProvisionToAll, handleESP32Wake, getESP32Ports, getSerialConnectionStatus, getSerialLastError, getSerialReachableBoards, releaseESP32SerialPorts } from './esp32-serial.js';
+import { esp32ConnectionCount, getESP32DeviceInfo, onESP32Message, sendAuthProvisionToAll, sendWifiProvision, sendWifiProvisionToAll, handleESP32Wake, getESP32Ports, getSerialConnectionStatus, getSerialLastError, getSerialReachableBoards, releaseESP32SerialPorts, sanitizeRssiDbm } from './esp32-serial.js';
 import { clampLeaseSeconds, clearLease, readLease, writeLease } from './esp32-flash-lease.js';
 import { loadWifiConfig } from './wifi-config.js';
 import { getAdbDeviceCountCached, getCachedAdbDevices } from './adb-reverse.js';
@@ -361,6 +361,7 @@ interface WifiEsp32Device {
   fullRefreshCount?: number;
   usageCodex5H?: number;
   usageCodex7D?: number;
+  rssiDbm?: number;
   lastSeenMs: number;
 }
 const wifiEsp32Devices = new Map<string, WifiEsp32Device>();
@@ -790,6 +791,7 @@ function registerWifiEsp32(d: Record<string, unknown>, ws: WebSocket): void {
     usageCodex7D: typeof d.usageCodex7D === 'number' ? d.usageCodex7D : undefined,
     repaintCount: typeof d.repaintCount === 'number' ? d.repaintCount : undefined,
     fullRefreshCount: typeof d.fullRefreshCount === 'number' ? d.fullRefreshCount : undefined,
+    rssiDbm: sanitizeRssiDbm(d.rssiDbm),
     lastSeenMs: Date.now(),
   });
   wifiEsp32Sockets.set(key, ws);
@@ -1388,6 +1390,7 @@ function buildNodeModuleHealth(startedModules: DeviceModule[]): Record<string, u
         processingCount: status.processingCount,
         repaintCount: status.repaintCount,
         fullRefreshCount: status.fullRefreshCount,
+        rssiDbm: status.rssiDbm,
         deviceInfoFresh: status.deviceInfoFresh,
       } : null,
       lastReadAt: status.lastReadAt,
@@ -4525,6 +4528,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           usageCodex7D: d.usageCodex7D ?? null,
           repaintCount: d.repaintCount ?? null,
           fullRefreshCount: d.fullRefreshCount ?? null,
+          rssiDbm: d.rssiDbm ?? null,
         })),
       };
     }
