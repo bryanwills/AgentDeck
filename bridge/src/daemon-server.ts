@@ -1698,6 +1698,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // when the first /health request arrives.
   let gatewayAdapter: OpenClawAdapter | null = null;
   let gatewayConnecting = false;
+  // Backoff for adapters that die before their handshake completes (Gateway
+  // still booting, auth refused). The probe retries on every tick while the
+  // port is open, so without this a refusing Gateway is dialled every 5 s.
+  let gatewayFailedAttempts = 0;
+  let gatewayRetryAtMs = 0;
   let moduleHealthProvider: () => Record<string, unknown> = () => ({});
 
   // Gateway-local activity state for the virtual `openclaw-gateway` session row.
@@ -5053,6 +5058,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
 
   function connectGatewayAdapter(): void {
     if (gatewayAdapter || gatewayConnecting) return;
+    if (Date.now() < gatewayRetryAtMs) return;
     gatewayConnecting = true;
     log('[agentdeck] OpenClaw Gateway detected, connecting...');
 
@@ -5236,6 +5242,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             core.cachedGatewayAuthStatus = 'connected';
             gatewaySessionState = 'idle';
             bridgeLogStream.start();
+            gatewayFailedAttempts = 0;
+            gatewayRetryAtMs = 0;
             log('[agentdeck] OpenClaw Gateway connected');
             settleGatewayInstability(Date.now());
             if (core.stateMachine.getSnapshot().state === 'disconnected') {
@@ -5272,7 +5280,23 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       }
     });
 
-    adapter.on('exit', () => disconnectGatewayAdapter());
+    // The adapter runs without autoReconnect, so 'exit' (its socket closed) is
+    // final: drop it so the next probe tick can dial a fresh one. Guarded by
+    // identity — a late exit from a replaced adapter must not tear down its
+    // successor.
+    let everConnected = false;
+    adapter.on('event', (evt: AdapterEvent) => {
+      if (evt.source === 'connection' && evt.status === 'connected') everConnected = true;
+    });
+    adapter.on('exit', () => {
+      if (!everConnected) {
+        gatewayFailedAttempts += 1;
+        const delayMs = Math.min(5000 * 2 ** (gatewayFailedAttempts - 1), 300_000);
+        gatewayRetryAtMs = Date.now() + delayMs;
+        log(`[agentdeck] OpenClaw Gateway handshake did not complete; retrying in ${Math.round(delayMs / 1000)}s`);
+      }
+      if (gatewayAdapter === adapter) disconnectGatewayAdapter();
+    });
 
     adapter.start({ port, externalServer: httpServer } as any).then(() => {
       gatewayAdapter = adapter;
@@ -6871,6 +6895,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   core.startOllamaProbe();
   core.startMlxProbe();
   core.startAntigravityProbe();
+  // Level-triggered: `onAvailable` runs on every tick the port is open, and
+  // connectGatewayAdapter's own guards make it a no-op while an adapter lives.
   core.startGatewayProbe(5000,
     () => connectGatewayAdapter(),
     () => { if (gatewayAdapter && !gatewayAdapter.isAlive()) disconnectGatewayAdapter(); },
