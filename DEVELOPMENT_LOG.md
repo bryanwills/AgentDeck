@@ -24,6 +24,13 @@ generation left no drift; token mirrors agree. All three PlatformIO targets
 Design lint reports the existing 92 violations outside these edits. Hardware
 installation and physical-screen validation are separate from these build checks.
 
+Follow-up review found that the render task must not write serial diagnostics
+while the network task emits newline-framed JSON. Completion records now cross a
+fixed four-entry single-producer/single-consumer ring with acquire/release
+publication; only the network task prints them, after its serial protocol work.
+A full queue drops the diagnostic record instead of blocking rendering; the
+refresh count reveals the gap. No heap allocation or painted text is added.
+
 ## 2026-09-27 — Voice reboot diagnostics and e-ink interval counters
 
 IPS10 rebooted after a spoken OpenClaw invocation. The daemon observed uptime
