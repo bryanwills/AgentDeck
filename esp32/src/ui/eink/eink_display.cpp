@@ -2546,6 +2546,8 @@ uint32_t keyLastMs = 0;
 
 void refresh(void (*draw)(const Snap&), const Snap& s, bool full,
              AgentDeckEpd47::Erase erase = AgentDeckEpd47::Erase::ClearAll) {
+    const uint32_t refreshStartedMs = millis();
+    bool actualFull = full;
     // Count at the one choke point that performs physical panel I/O, not at
     // render requests (most of which content-hash/rate gates intentionally
     // discard). Relaxed atomics keep device_info reads race-free across the
@@ -2558,6 +2560,7 @@ void refresh(void (*draw)(const Snap&), const Snap& s, bool full,
     const AgentDeckEpd47::Erase mode = display.prev()
         ? erase : AgentDeckEpd47::Erase::ClearAll;
     const bool hardClear = AgentDeckEpd47::isHardClear(mode);
+    actualFull = hardClear;
     if (hardClear)
         __atomic_add_fetch(&fullRefreshCountValue, 1u, __ATOMIC_RELAXED);
     display.fillScreen(GxEPD_WHITE);
@@ -2581,13 +2584,14 @@ void refresh(void (*draw)(const Snap&), const Snap& s, bool full,
     AgentDeckEpd47::recordErase(epd47RefreshState, mode, millis());
     epd_poweroff();
 #else
-    if (full) __atomic_add_fetch(&fullRefreshCountValue, 1u, __ATOMIC_RELAXED);
 #if defined(BOARD_NM_EPD_420)
     // hasPartialUpdate on this driver means partial RAM addressing, not a safe
     // physical partial waveform for the installed tri-color glass. Never call
     // refresh_bw(): every admitted NM repaint is a stock full-color cycle.
     full = true;
 #endif
+    actualFull = full;
+    if (full) __atomic_add_fetch(&fullRefreshCountValue, 1u, __ATOMIC_RELAXED);
     if (full) {
         display.setFullWindow();
         partialCount = 0;
@@ -2607,6 +2611,12 @@ void refresh(void (*draw)(const Snap&), const Snap& s, bool full,
     // RAM retained so the next partial refresh diffs cleanly. See note above.
     display.powerOff();
 #endif
+    // Completion event, not a render request. millis subtraction is wrap-safe;
+    // the daemon retains only this numeric record, never the painted content.
+    Serial.printf("[EinkRefresh] count=%lu full=%u startedMs=%lu durationMs=%lu\n",
+        (unsigned long)__atomic_load_n(&repaintCountValue, __ATOMIC_RELAXED),
+        unsigned(actualFull), (unsigned long)refreshStartedMs,
+        (unsigned long)(uint32_t)(millis() - refreshStartedMs));
 }
 
 }  // namespace
