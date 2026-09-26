@@ -161,6 +161,12 @@ Protocol generation has no drift; token mirrors match. Actual AMOLED firmware
 compiled successfully with the added WiFi telemetry. Other running boards retain
 their previously verified firmware; old firmware may omit RSSI by contract.
 
+The first combined macOS CI run exposed a stale native Luna fixture inherited
+from the earlier usage change: it expected a reserve to replace account windows
+at 30%/10%. The fixture now exhausts a live window before expecting Luna and also
+asserts that reset account windows return even while the reserve remains reported.
+Production selection logic is unchanged.
+
 ## 2026-09-26 — IPS10 display, WiFi and internal heap recovery
 
 ## Failure and evidence

@@ -51,3 +51,9 @@ Combined build/typecheck succeeded; 4,763 tests passed with two skipped.
 Protocol generation has no drift; token mirrors match. Actual AMOLED firmware
 compiled successfully with the added WiFi telemetry. Other running boards retain
 their previously verified firmware; old firmware may omit RSSI by contract.
+
+The first combined macOS CI run exposed a stale native Luna fixture inherited
+from the earlier usage change: it expected a reserve to replace account windows
+at 30%/10%. The fixture now exhausts a live window before expecting Luna and also
+asserts that reset account windows return even while the reserve remains reported.
+Production selection logic is unchanged.
