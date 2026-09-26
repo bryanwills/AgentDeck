@@ -290,28 +290,21 @@ static void handleUsageUpdate(JsonObject& obj) {
     g_state.codexSecondaryPercent = -1.0f;
     g_state.codexPrimaryReset[0] = '\0';
     g_state.codexSecondaryReset[0] = '\0';
-#if defined(BOARD_IPS10)
     g_state.codexLunaPercent = -1;
     g_state.codexLunaReset[0] = '\0';
-    g_state.codexWindowMinutes[0] = 300; g_state.codexWindowMinutes[1] = 10080;
-#endif
     if (obj["codexRateLimits"].is<JsonObject>()) {
         JsonObject cx = obj["codexRateLimits"].as<JsonObject>();
-#if defined(BOARD_IPS10)
-        g_state.codexWindowMinutes[0] = cx["primary"]["windowMinutes"] | 300;
-        g_state.codexWindowMinutes[1] = cx["secondary"]["windowMinutes"] | 10080;
         JsonObject luna = cx["lunaReserve"];
         if (luna["usedPercent"].is<float>() && !luna["stale"].as<bool>()) {
             g_state.codexLunaPercent = luna["usedPercent"].as<float>();
             storeResetTime(luna, "resetsAt", g_state.codexLunaReset, sizeof(g_state.codexLunaReset));
         }
-#endif
         if (cx["primary"].is<JsonObject>()) {
             JsonObject p = cx["primary"].as<JsonObject>();
             if (!p["stale"].as<bool>()) {
                 if (p["usedPercent"].is<float>()) g_state.codexPrimaryPercent = p["usedPercent"].as<float>();
                 storeResetTime(p, "resetsAt", g_state.codexPrimaryReset, sizeof(g_state.codexPrimaryReset));
-                g_state.codexPrimaryMinutes = p["windowMinutes"] | 0;
+                g_state.codexPrimaryMinutes = p["windowMinutes"] | 300;
             }
         }
         if (cx["secondary"].is<JsonObject>()) {
@@ -319,7 +312,7 @@ static void handleUsageUpdate(JsonObject& obj) {
             if (!s["stale"].as<bool>()) {
                 if (s["usedPercent"].is<float>()) g_state.codexSecondaryPercent = s["usedPercent"].as<float>();
                 storeResetTime(s, "resetsAt", g_state.codexSecondaryReset, sizeof(g_state.codexSecondaryReset));
-                g_state.codexSecondaryMinutes = s["windowMinutes"] | 0;
+                g_state.codexSecondaryMinutes = s["windowMinutes"] | 10080;
             }
         }
     }

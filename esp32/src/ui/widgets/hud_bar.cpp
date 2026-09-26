@@ -8,6 +8,7 @@
 #include "../assets/logo.h"
 #include "../../state/agent_state.h"
 #include "../../util/usage_format.h"
+#include "../../util/usage_rows.h"
 #include "../../util/utf8.h"
 #include "../agent_label.h"
 #include "config.h"
@@ -23,6 +24,7 @@
 #include "../../audio/es8311_codec.h"       // volume steppers
 #endif
 #include <Arduino.h>
+#include <cctype>
 #include <cstdarg>
 
 #if defined(IPS10_PERF_HUD)
@@ -226,6 +228,7 @@ static const lv_image_dsc_t* ips10AgentGlyph(const char* agentType) {
     if (strstr(agentType, "codex"))     return &glyphCodex;
     if (strstr(agentType, "claude"))    return &glyphOctopus;
     if (strstr(agentType, "kiro"))      return &glyphKiro;
+    if (!strcmp(agentType, "zai"))      return &glyphZai;   // USAGE provider mark only
     return nullptr;   // unknown agent → dot fallback in the name line
 }
 
@@ -388,63 +391,22 @@ static const char* ips10StatePill(const char* state) {
 static lv_obj_t* panelRight = nullptr;
 static lv_obj_t* lblTankHeader = nullptr;
 
-// Per-provider tank groups: each = a brand-coloured header ("● CLAUDE" / "● CODEX")
-// over its 5h/7d water tanks. The group is the hide unit, so 1 or 2 providers lay
-// out cohesively and the panel simply grows a second block when Codex data arrives.
-// IPS10 renders usage in its D1 topbar instead — the whole tank panel is
-// !BOARD_IPS10 only.
-static lv_obj_t* claudeGroup = nullptr;
-static lv_obj_t* codexGroup  = nullptr;
-static lv_obj_t* zaiGroup    = nullptr;  // #350 — third provider block
-
-// Claude 5h / 7d tanks
-static lv_obj_t* gauge5hBox = nullptr;
-static lv_obj_t* gauge5hFill = nullptr;
-static lv_obj_t* gauge5hPct = nullptr;
-static lv_obj_t* gauge5hPeriod = nullptr;
-static lv_obj_t* gauge5hReset = nullptr;
-static lv_obj_t* gauge7dBox = nullptr;
-static lv_obj_t* gauge7dFill = nullptr;
-static lv_obj_t* gauge7dPct = nullptr;
-static lv_obj_t* gauge7dPeriod = nullptr;
-static lv_obj_t* gauge7dReset = nullptr;
-
-// Codex 5h / 7d tanks (same water-tank widget, blue-headed group)
-static lv_obj_t* gaugeCx5hBox = nullptr;
-static lv_obj_t* gaugeCx5hFill = nullptr;
-static lv_obj_t* gaugeCx5hPct = nullptr;
-static lv_obj_t* gaugeCx5hPeriod = nullptr;
-static lv_obj_t* gaugeCx5hReset = nullptr;
-static lv_obj_t* gaugeCx7dBox = nullptr;
-static lv_obj_t* gaugeCx7dFill = nullptr;
-static lv_obj_t* gaugeCx7dPct = nullptr;
-static lv_obj_t* gaugeCx7dPeriod = nullptr;
-static lv_obj_t* gaugeCx7dReset = nullptr;
-
-// z.ai 5h / long tanks (#350) — the long gauge is labeled dynamically ("7d" or
-// "MCP" by quantity), so the period label is retained for relabeling.
-static lv_obj_t* gaugeZa5hBox = nullptr;
-static lv_obj_t* gaugeZa5hFill = nullptr;
-static lv_obj_t* gaugeZa5hPct = nullptr;
-static lv_obj_t* gaugeZa5hPeriod = nullptr;
-static lv_obj_t* gaugeZa5hReset = nullptr;
-static lv_obj_t* gaugeZa7dBox = nullptr;
-static lv_obj_t* gaugeZa7dFill = nullptr;
-static lv_obj_t* gaugeZa7dPct = nullptr;
-static lv_obj_t* gaugeZa7dPeriod = nullptr;
-static lv_obj_t* gaugeZa7dReset = nullptr;
-
-// Stale indicator
-static lv_obj_t* lblStale = nullptr;
-
-#if !defined(BOARD_IPS10)
-// Account chip (styled pill) — shortened Antigravity plan ("AGY Pro") + any
-// subscription expiries. Hidden when the daemon supplies none (e.g. the App Store
-// Swift daemon exposes no subscription/Antigravity data). The raw Antigravity
-// credit count is never shown (meaningless at a glance).
-static lv_obj_t* acctChip = nullptr;
-static lv_obj_t* acctChipLabel = nullptr;
+// Per-provider tank groups (UsageRows order: Claude, Codex, z.ai, Antigravity):
+// a brand-coloured header ("● CODEX  Pro") over up to two tanks. A tank shows a
+// window — or the provider's plan in the slot a missing window leaves (e.g. a
+// Codex plan with no 5h limit). The group is the hide unit, so providers lay
+// out cohesively. IPS10 renders usage in its workspace — !BOARD_IPS10 only.
+// Slots are indexed by display position (the header names the provider), so
+// narrow panels hold only the three columns they can show — DRAM is tight on
+// the no-PSRAM TTGO.
+#if IS_ROUND || defined(BOARD_TTGO)
+static constexpr uint8_t TANK_SLOTS = 3;
+#else
+static constexpr uint8_t TANK_SLOTS = UsageRows::MAX_GROUPS;
 #endif
+struct Tank { lv_obj_t *col, *fill, *pct, *period, *reset; };
+static lv_obj_t* tankGroup[TANK_SLOTS] = {};
+static Tank tanks[TANK_SLOTS][2] = {};
 
 static bool visible = true;
 static bool lastShowTankStatus = true;
@@ -564,13 +526,10 @@ static lv_obj_t* createGauge(lv_obj_t* parent,
     return col;
 }
 
-// Provider tank group: a brand-coloured header ("● CLAUDE") stacked over a row of
-// the provider's 5h/7d water tanks. Returned container is the hide unit. Keeps the
-// existing tank aesthetic while making the provider unambiguous (matches the IPS10
-// "brand mark conveys the provider, labels stay 5h/7d" convention).
-static lv_obj_t* makeTankGroup(lv_obj_t* parent, const char* name, uint32_t brandColor,
-                               lv_obj_t*& b5, lv_obj_t*& f5, lv_obj_t*& p5, lv_obj_t*& pe5, lv_obj_t*& r5,
-                               lv_obj_t*& b7, lv_obj_t*& f7, lv_obj_t*& p7, lv_obj_t*& pe7, lv_obj_t*& r7) {
+// Provider tank group: a brand-coloured header stacked over the provider's two
+// tanks. Returned container is the hide unit. Keeps the tank aesthetic while
+// the brand colour names the provider (labels stay 5h/7d).
+static lv_obj_t* makeTankGroup(lv_obj_t* parent, Tank (&slots)[2]) {
     lv_obj_t* grp = lv_obj_create(parent);
     lv_obj_set_size(grp, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(grp, LV_OPA_TRANSP, 0);
@@ -579,30 +538,31 @@ static lv_obj_t* makeTankGroup(lv_obj_t* parent, const char* name, uint32_t bran
     lv_obj_set_style_pad_row(grp, 2, 0);
     lv_obj_clear_flag(grp, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(grp, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(grp, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(grp, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    // Brand header: coloured dot + provider name
-    lv_obj_t* hdr = lv_label_create(grp);
-    lv_obj_set_style_text_font(hdr, &lv_font_montserrat_10, 0);
-    lv_label_set_recolor(hdr, true);
-    char h[48];
-    snprintf(h, sizeof(h), "#%06lX " LV_SYMBOL_BULLET "# #%06lX %s#",
-             (unsigned long)brandColor, (unsigned long)brandColor, name);
-    lv_label_set_text(hdr, h);
+    lv_obj_t* header = lv_label_create(grp);   // child 0: provider header
+    lv_obj_set_style_text_font(header, &lv_font_montserrat_10, 0);
+    lv_label_set_recolor(header, true);
+    lv_label_set_long_mode(header, LV_LABEL_LONG_CLIP);
+    lv_obj_set_width(header, GAUGE_SIZE);
+    lv_obj_set_style_text_align(header, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(header, "");
 
-    // Tanks row (5h + 7d side by side)
-    lv_obj_t* row = lv_obj_create(grp);
-    lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(row, 0, 0);
-    lv_obj_set_style_pad_all(row, 0, 0);
-    lv_obj_set_style_pad_column(row, GAUGE_GAP, 0);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    createGauge(row, b5, f5, p5, pe5, r5, "5h");
-    createGauge(row, b7, f7, p7, pe7, r7, "7d");
+    for (auto& t : slots) {
+        lv_obj_t* box = nullptr;
+        t.col = createGauge(grp, box, t.fill, t.pct, t.period, t.reset, "");
+    }
+    lv_obj_add_flag(grp, LV_OBJ_FLAG_HIDDEN);
     return grp;
+}
+
+static uint32_t tankBrand(UsageRows::Provider p) {
+    switch (p) {
+        case UsageRows::CLAUDE: return Theme::ClaudeBody;
+        case UsageRows::CODEX:  return Theme::CloudBodyLight;
+        case UsageRows::ZAI:    return Theme::ZaiBlue;
+        default:                return Theme::AntigravityYellow;
+    }
 }
 
 #if defined(BOARD_IPS10)
@@ -1679,75 +1639,8 @@ void init(lv_obj_t* parent) {
 #else
     lv_obj_align(panelRight, LV_ALIGN_BOTTOM_RIGHT, -8, -8);
 #endif
-    claudeGroup = makeTankGroup(providerRail, "CLAUDE", Theme::ClaudeBody,
-        gauge5hBox, gauge5hFill, gauge5hPct, gauge5hPeriod, gauge5hReset,
-        gauge7dBox, gauge7dFill, gauge7dPct, gauge7dPeriod, gauge7dReset);
-    codexGroup = makeTankGroup(providerRail, "CODEX", Theme::CloudBodyLight,
-        gaugeCx5hBox, gaugeCx5hFill, gaugeCx5hPct, gaugeCx5hPeriod, gaugeCx5hReset,
-        gaugeCx7dBox, gaugeCx7dFill, gaugeCx7dPct, gaugeCx7dPeriod, gaugeCx7dReset);
-    lv_obj_add_flag(codexGroup, LV_OBJ_FLAG_HIDDEN);
-    // z.ai single tank (#348/#350) — the 5h credits window rides the same
-    // tank widget grammar as Claude/Codex, sharing the provider rail so
-    // the panel doesn't grow past the screen bottom. MCP is deliberately
-    // hidden on ESP32: small displays, and the tool-call quota is secondary
-    // to the token window at glance distance.
-    zaiGroup = lv_obj_create(providerRail);
-    lv_obj_set_size(zaiGroup, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_opa(zaiGroup, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(zaiGroup, 0, 0);
-    lv_obj_set_style_pad_all(zaiGroup, 0, 0);
-    lv_obj_set_style_pad_row(zaiGroup, 2, 0);
-    lv_obj_clear_flag(zaiGroup, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_flex_flow(zaiGroup, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(zaiGroup, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    {
-        lv_obj_t* hdr = lv_label_create(zaiGroup);
-        lv_obj_set_style_text_font(hdr, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(hdr, lv_color_hex(Theme::HUDText), 0);
-        lv_label_set_recolor(hdr, true);
-        char h[32];
-        snprintf(h, sizeof(h), "#%06lX " LV_SYMBOL_BULLET "# Z.AI",
-                 (unsigned long)Theme::ZaiBlue);
-        lv_label_set_text(hdr, h);
-        lv_obj_t* row = lv_obj_create(zaiGroup);
-        lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_width(row, 0, 0);
-        lv_obj_set_style_pad_all(row, 0, 0);
-        lv_obj_set_style_pad_column(row, GAUGE_GAP, 0);
-        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        createGauge(row, gaugeZa5hBox, gaugeZa5hFill, gaugeZa5hPct, gaugeZa5hPeriod, gaugeZa5hReset, "5h");
-    }
-    lv_obj_add_flag(zaiGroup, LV_OBJ_FLAG_HIDDEN);
-
-    // Stale indicator (only shown when data is stale, hidden by default)
-    lblStale = lv_label_create(panelRight);
-    lv_obj_set_style_text_color(lblStale, lv_color_hex(Theme::StatusAmber), 0);
-    lv_obj_set_style_text_font(lblStale, &lv_font_montserrat_10, 0);
-    lv_label_set_text(lblStale, "");
-    lv_obj_add_flag(lblStale, LV_OBJ_FLAG_HIDDEN);
-
-    // Account chip: a subtle glass pill holding "AGY Pro ~8/1" + subscription
-    // expiries. Hidden until data (so a Claude-only / Swift-daemon setup shows no
-    // empty chip). Raw Antigravity credit count is never shown.
-    acctChip = lv_obj_create(panelRight);
-    lv_obj_set_size(acctChip, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_color(acctChip, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_bg_opa(acctChip, (lv_opa_t)18, 0);
-    lv_obj_set_style_border_width(acctChip, 0, 0);
-    lv_obj_set_style_radius(acctChip, 7, 0);
-    lv_obj_set_style_pad_left(acctChip, 6, 0);
-    lv_obj_set_style_pad_right(acctChip, 6, 0);
-    lv_obj_set_style_pad_top(acctChip, 2, 0);
-    lv_obj_set_style_pad_bottom(acctChip, 2, 0);
-    lv_obj_clear_flag(acctChip, LV_OBJ_FLAG_SCROLLABLE);
-    acctChipLabel = lv_label_create(acctChip);
-    lv_obj_set_style_text_font(acctChipLabel, &lv_font_montserrat_10, 0);
-    lv_label_set_recolor(acctChipLabel, true);
-    lv_label_set_text(acctChipLabel, "");
-    lv_obj_add_flag(acctChip, LV_OBJ_FLAG_HIDDEN);
+    for (uint8_t g = 0; g < TANK_SLOTS; ++g)
+        tankGroup[g] = makeTankGroup(providerRail, tanks[g]);
 #endif
 #endif // !BOARD_IPS10
 }
@@ -1878,49 +1771,19 @@ void update() {
 #endif
 
 #if !defined(BOARD_IPS10)
-    // Codex windows + account-chip string for the TANK STATUS panel. Read straight
-    // from g_state (all fields exist on every board). Built here under the lock;
-    // rendered after unlockState() below.
-    float cxP5h = g_state.codexPrimaryPercent;
-    float cxP7d = g_state.codexSecondaryPercent;
-    char cxReset5h[20], cxReset7d[20];
-    strncpy(cxReset5h, g_state.codexPrimaryReset, sizeof(cxReset5h) - 1);   cxReset5h[sizeof(cxReset5h) - 1] = '\0';
-    strncpy(cxReset7d, g_state.codexSecondaryReset, sizeof(cxReset7d) - 1); cxReset7d[sizeof(cxReset7d) - 1] = '\0';
-    float zaP5h = g_state.zaiPrimaryPercent;
-    float zaP7d = g_state.zaiSecondaryPercent;
-    bool zaIsMcp = g_state.zaiSecondaryIsMcp;
-    char zaReset5h[20], zaReset7d[20];
-    strncpy(zaReset5h, g_state.zaiPrimaryReset, sizeof(zaReset5h) - 1);   zaReset5h[sizeof(zaReset5h) - 1] = '\0';
-    strncpy(zaReset7d, g_state.zaiSecondaryReset, sizeof(zaReset7d) - 1); zaReset7d[sizeof(zaReset7d) - 1] = '\0';
-    // Account chip: shortened Antigravity plan (gold) + subscription expiries (dim).
-    char agyBuf[28]; agyBuf[0] = '\0';
-    char subsBuf[96]; subsBuf[0] = '\0'; size_t subsPos = 0;
-    for (uint8_t i = 0; i < g_state.subscriptionCount; i++) {
-        const auto& sub = g_state.subscriptions[i];
-        if (UsageFormat::isAntigravityPlanName(sub.name)) {
-            UsageFormat::formatAgyPlan(sub.name, agyBuf, sizeof(agyBuf));
-            if (sub.until[0]) {
-                size_t l = strlen(agyBuf);
-                snprintf(agyBuf + l, sizeof(agyBuf) - l, " %s", sub.until);
-            }
-        } else if (sub.until[0]) {
-            // Non-Antigravity plan with an expiry → "<provider> ~M/D" (provider =
-            // the first word of the plan name, e.g. "ChatGPT Plus" → "ChatGPT").
-            char nm[16]; size_t k = 0;
-            for (; sub.name[k] && sub.name[k] != ' ' && k < sizeof(nm) - 1; k++) nm[k] = sub.name[k];
-            nm[k] = '\0';
-            int w = snprintf(subsBuf + subsPos, sizeof(subsBuf) - subsPos, "%s%s %s",
-                             subsPos ? "  " : "", nm, sub.until);
-            if (w > 0) subsPos += (size_t)w;
-        }
+    // Provider-grouped usage for the tank panel (shared UsageRows rules:
+    // z.ai MCP, the Codex Luna reserve, plans in free slots). Built under the
+    // lock; rendered after unlockState() below.
+    UsageRows::Group usageGroups[UsageRows::MAX_GROUPS];
+    uint8_t usageGroupCount = UsageRows::build(g_state, usageGroups);
+    // Narrow panels hold three provider columns; a plan-only provider yields.
+    while (usageGroupCount > TANK_SLOTS) {
+        int drop = -1;
+        for (int k = usageGroupCount - 1; k >= 0 && drop < 0; --k) if (!usageGroups[k].rowCount) drop = k;
+        if (drop < 0) drop = usageGroupCount - 1;
+        for (int k = drop; k + 1 < usageGroupCount; ++k) usageGroups[k] = usageGroups[k + 1];
+        --usageGroupCount;
     }
-    if (!agyBuf[0] && g_state.antigravityPlan[0]) {
-        UsageFormat::formatAgyPlan(g_state.antigravityPlan, agyBuf, sizeof(agyBuf));
-    }
-    // Compose the recolored chip: Antigravity gold, subscription expiries dim.
-    char chipBuf[160]; chipBuf[0] = '\0'; size_t cp = 0;
-    if (agyBuf[0])  cp += (size_t)snprintf(chipBuf + cp, sizeof(chipBuf) - cp, "#F3D233 %s#", agyBuf);
-    if (subsBuf[0]) cp += (size_t)snprintf(chipBuf + cp, sizeof(chipBuf) - cp, "%s#94A3B8 %s#", cp ? "  " : "", subsBuf);
 #endif
 
 #if !defined(BOARD_IPS10)
@@ -2047,86 +1910,44 @@ void update() {
 
 #if !defined(BOARD_IPS10)
     // === Right panel: per-provider water-tank groups ===
-    // Claude group — updated + hidden as a unit when there's no Claude quota data
-    // (a Codex-only user, or the App Store Swift daemon which can't read Claude
-    // OAuth usage). Showing empty "--" tanks would read as broken.
-    updateGauge(gauge5hFill, gauge5hPct, gauge5hReset, p5h, reset5h, usageStale);
-    updateGauge(gauge7dFill, gauge7dPct, gauge7dReset, p7d, reset7d, usageStale);
-    if (gauge5hBox) {
-        if (p5h >= 0.0f) {
-            lv_obj_clear_flag(lv_obj_get_parent(gauge5hBox), LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(lv_obj_get_parent(gauge5hBox), LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-    if (gauge7dBox) {
-        if (p7d >= 0.0f) {
-            lv_obj_clear_flag(lv_obj_get_parent(gauge7dBox), LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(lv_obj_get_parent(gauge7dBox), LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-    {
-        bool showClaude = (p5h >= 0.0f || p7d >= 0.0f);
-        if (claudeGroup) { showClaude ? lv_obj_clear_flag(claudeGroup, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(claudeGroup, LV_OBJ_FLAG_HIDDEN); }
-    }
-
-    // Codex group — same water-tank widget under a blue "● CODEX" header. Shown
-    // whenever a Codex window is present, independent of Claude data.
-    updateGauge(gaugeCx5hFill, gaugeCx5hPct, gaugeCx5hReset, cxP5h, cxReset5h, false);
-    updateGauge(gaugeCx7dFill, gaugeCx7dPct, gaugeCx7dReset, cxP7d, cxReset7d, false);
-    if (gaugeCx5hBox) {
-        if (cxP5h >= 0.0f) {
-            lv_obj_clear_flag(lv_obj_get_parent(gaugeCx5hBox), LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(lv_obj_get_parent(gaugeCx5hBox), LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-    if (gaugeCx7dBox) {
-        if (cxP7d >= 0.0f) {
-            lv_obj_clear_flag(lv_obj_get_parent(gaugeCx7dBox), LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(lv_obj_get_parent(gaugeCx7dBox), LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-    {
-        bool showCodex = (cxP5h >= 0.0f || cxP7d >= 0.0f);
-        if (codexGroup) { showCodex ? lv_obj_clear_flag(codexGroup, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(codexGroup, LV_OBJ_FLAG_HIDDEN); }
-    }
-
-    // z.ai single tank (#348) — 5h credits only; MCP is hidden on ESP32.
-    updateGauge(gaugeZa5hFill, gaugeZa5hPct, gaugeZa5hReset, zaP5h, zaReset5h, false);
-    if (gaugeZa5hBox) {
-        if (zaP5h >= 0.0f) {
-            lv_obj_clear_flag(lv_obj_get_parent(gaugeZa5hBox), LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(lv_obj_get_parent(gaugeZa5hBox), LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-    {
-        bool showZai = (zaP5h >= 0.0f);
-        if (zaiGroup) { showZai ? lv_obj_clear_flag(zaiGroup, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(zaiGroup, LV_OBJ_FLAG_HIDDEN); }
-    }
-
-    // Stale indicator (shown only when we have Claude data but it's stale)
-    if (lblStale) {
-        bool showStale = usageStale && (p5h >= 0.0f || p7d >= 0.0f);
-        if (showStale) {
-            lv_label_set_text(lblStale, "! stale");
-            lv_obj_clear_flag(lblStale, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(lblStale, LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-
-    // Account chip (AGY plan + subscription expiries). Hidden when the daemon
-    // supplies none (e.g. the App Store Swift daemon with no subscription data).
-    if (acctChip) {
-        if (chipBuf[0]) {
-            lv_label_set_text(acctChipLabel, chipBuf);
-            lv_obj_clear_flag(acctChip, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(acctChip, LV_OBJ_FLAG_HIDDEN);
+    // Hide-if-absent: a provider with no window and no plan leaves no ghost
+    // "--" tanks (a Codex-only user, or the App Store Swift daemon without
+    // Claude OAuth usage).
+    for (uint8_t i = 0; i < TANK_SLOTS; ++i) {
+        if (!tankGroup[i]) continue;
+        if (i >= usageGroupCount) { lv_obj_add_flag(tankGroup[i], LV_OBJ_FLAG_HIDDEN); continue; }
+        const auto& grp = usageGroups[i];
+        const uint8_t p = i;   // display slot
+        lv_obj_clear_flag(tankGroup[p], LV_OBJ_FLAG_HIDDEN);
+        const bool planSlot = grp.hasPlan() && grp.rowCount < 2;
+        char upper[16]; size_t k = 0;
+        for (const char* c = grp.name(); *c && k < sizeof(upper) - 1; ++c) upper[k++] = (char)toupper((unsigned char)*c);
+        upper[k] = '\0';
+        char hdr[80];
+        const unsigned long brand = (unsigned long)tankBrand(grp.provider);
+        if (!planSlot && grp.hasPlan())
+            snprintf(hdr, sizeof(hdr), "#%06lX " LV_SYMBOL_BULLET " %s# #94A3B8 %s#", brand, upper, grp.tier);
+        else
+            snprintf(hdr, sizeof(hdr), "#%06lX " LV_SYMBOL_BULLET " %s#", brand, upper);
+        lv_label_set_text(lv_obj_get_child(tankGroup[p], 0), hdr);
+        for (uint8_t s = 0; s < 2; ++s) {
+            Tank& t = tanks[p][s];
+            if (s < grp.rowCount) {
+                const auto& row = grp.rows[s];
+                lv_obj_clear_flag(t.col, LV_OBJ_FLAG_HIDDEN);
+                lv_label_set_text(t.period, row.label);
+                // A reserve fills by what is LEFT; colour still follows use.
+                updateGauge(t.fill, t.pct, t.reset, (float)row.shown(), row.reset, false);
+                lv_obj_set_style_bg_color(t.fill, lv_color_hex(gaugeColor(row.used)), 0);
+            } else if (s == grp.rowCount && planSlot) {
+                lv_obj_clear_flag(t.col, LV_OBJ_FLAG_HIDDEN);
+                lv_label_set_text(t.period, "Plan");
+                lv_obj_set_width(t.fill, 0);
+                lv_label_set_text(t.pct, grp.tier);
+                lv_label_set_text(t.reset, grp.until);
+            } else {
+                lv_obj_add_flag(t.col, LV_OBJ_FLAG_HIDDEN);
+            }
         }
     }
 #endif
@@ -2685,8 +2506,8 @@ void update() {
     bool showTankStatus = connected && (p5h >= 0.0f || p7d >= 0.0f
 #if !defined(BOARD_IPS10)
         // A Codex-only user (or the Swift daemon, which has no Claude quota) still
-        // gets the panel so its Codex tanks / account chip are visible.
-        || cxP5h >= 0.0f || cxP7d >= 0.0f || zaP5h >= 0.0f || chipBuf[0]
+        // gets the panel so its provider tanks / plan tiles are visible.
+        || usageGroupCount > 0
 #endif
     );
     if (firstUpdate || showTankStatus != lastShowTankStatus) {

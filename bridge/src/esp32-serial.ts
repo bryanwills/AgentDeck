@@ -385,7 +385,9 @@ export function prepareForSerial(event: BridgeEvent, _conn?: Pick<SerialConnecti
     // EVERY usage_update and their gauges froze on stale values.
     const cx = e.codexRateLimits
       ? {
-          ...(_conn?.deviceInfo?.board === 'ips_10' && e.codexRateLimits.lunaReserve ? {
+          // Every board renders the Luna reserve once an account window is
+          // exhausted (UsagePresentation.lunaActive); ~90 bytes of headroom.
+          ...(e.codexRateLimits.lunaReserve ? {
             lunaReserve: { usedPercent: e.codexRateLimits.lunaReserve.usedPercent,
               resetsAt: formatResetTime(e.codexRateLimits.lunaReserve.resetsAt),
               stale: e.codexRateLimits.lunaReserve.resetsAt ? Date.parse(e.codexRateLimits.lunaReserve.resetsAt) <= Date.now() : false },

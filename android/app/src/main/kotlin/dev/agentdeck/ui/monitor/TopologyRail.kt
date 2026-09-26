@@ -618,6 +618,8 @@ private data class RateChip(
     /// for > 10min the chip dims and shows `stale` in the reset slot so
     /// the cached value can't be mistaken for current data.
     val stale: Boolean = false,
+    /** `percent` is what remains (the Codex Luna reserve); colour reads the used complement. */
+    val remaining: Boolean = false,
 )
 
 @Composable
@@ -701,9 +703,10 @@ private fun ProviderRow(
 @Composable
 private fun RateChipView(chip: RateChip) {
     val pct = chip.percent.coerceIn(0.0, 100.0)
+    val used = if (chip.remaining) 100.0 - pct else pct
     val fillColor = when {
-        pct >= 90 -> TerrariumColors.LEDRed
-        pct >= 70 -> TerrariumColors.LEDAmber
+        used >= 90 -> TerrariumColors.LEDRed
+        used >= 70 -> TerrariumColors.LEDAmber
         else -> TerrariumColors.LEDGreen
     }
     val fillFraction = (pct / 100.0).toFloat()
@@ -869,6 +872,7 @@ private fun buildCodexRateChips(limits: CodexRateLimits?): List<RateChip> =
             percent = row.percent,
             reset = row.footnote ?: row.resetIso?.let { formatResetTime(it) },
             stale = row.stale || row.footnote != null,
+            remaining = row.remaining,
         )
     }
 

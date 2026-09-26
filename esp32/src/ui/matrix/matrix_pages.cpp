@@ -1,4 +1,5 @@
 #ifdef BOARD_LED8X32
+#include "../../util/usage_presentation.generated.h"
 #include "matrix_pages.h"
 #include "matrix_font.h"
 #include "official_dot_glyphs_generated.h"
@@ -352,6 +353,13 @@ void MatrixPages::renderCodex(CRGB* leds, float animTime) {
     char primaryLabel[5], secondaryLabel[5];
     windowLabel(g_state.codexPrimaryMinutes, "P", primaryLabel);
     windowLabel(g_state.codexSecondaryMinutes, "S", secondaryLabel);
+    // An exhausted account window hands the page to the Luna reserve, read as
+    // what is LEFT (the shared UsagePresentation rule every surface uses).
+    if (UsagePresentation::lunaActive(primary, secondary, g_state.codexLunaPercent)) {
+        primary = 100.0f - g_state.codexLunaPercent;
+        secondary = -1.0f;
+        snprintf(primaryLabel, sizeof(primaryLabel), "LUNA");
+    }
     unlockState();
 
     if (!connected) {

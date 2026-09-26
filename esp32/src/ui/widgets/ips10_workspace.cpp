@@ -16,6 +16,7 @@
 #include "../../util/utf8.h"
 #include "../../util/memory.h"
 #include "../../util/usage_format.h"
+#include "../../util/usage_rows.h"
 #include <Arduino.h>
 #include "net/serial_client.h"
 #include <cstdio>
@@ -75,8 +76,8 @@ static const lv_image_dsc_t* (*glyphFor)(const char*);
 static int detailW, sceneW;
 // Bounded, device-lifetime widget pools: ten projects / ten creatures total.
 // The static ocean is cached once; live updates never allocate frame canvases.
-static lv_obj_t *overview, *viewButton, *resourcePane, *quotaCards[6], *quotaBars[6], *pods[10], *seats[10], *creatures[10];
-static Text<40> quotaValue[6], quotaReset[6], podName[10], seatState[10];
+static lv_obj_t *overview, *viewButton, *resourcePane, *pods[10], *seats[10], *creatures[10];
+static Text<40> podName[10], seatState[10];
 static Text<240> voiceHeard;
 static Text<480> voiceSaid;
 static Text<64> voiceAnswerLabel;
@@ -91,10 +92,11 @@ static Text<160> agentActivity[10];
 static Text<40> cohortLabel[10], childLabel[10];
 static bool gatewayReady=false, retainedDetail=false;
 static lv_obj_t* recentCaption;
-static Text<32> quotaWindow[6];
-static lv_obj_t* providerNames[4];
-static Text<80> providerPlan[4];
-static lv_obj_t* lunaMoon;
+// USAGE: one card per provider (UsageRows order). Header = brand mark, name
+// and plan pill; up to two window rows = label, percent, bar, reset.
+struct UsageSlot { lv_obj_t *track, *fill; Text<24> label; Text<8> value; Text<32> reset; };
+struct UsageCard { lv_obj_t *card, *mark; Text<16> name; Text<40> plan; UsageSlot slot[2]; };
+static UsageCard usageCards[UsageRows::MAX_GROUPS];
 static lv_obj_t* modeButtons[2];
 static lv_obj_t* voiceButton;
 static lv_obj_t* voiceMeter;
@@ -147,11 +149,8 @@ static int page=0, pageCount=1;
 static uint32_t pageSince=0;
 static bool pageHeld=false;
 static char projectKeys[10][40];
-struct UsageSnapshot {
-    float percent[6], luna; char reset[6][20], lunaReset[20]; char plan[48]; bool mcp;
-    uint16_t minutes[2]; DashboardState::SubscriptionSlot subscriptions[4]; uint8_t subscriptionCount;
-};
-static UsageSnapshot quota;
+static UsageRows::Group usageGroups[UsageRows::MAX_GROUPS];
+static uint8_t usageGroupCount=0;
 static int podFor[10], memberSlot[10], podMembers[10], projectCount;
 static uint32_t brandColor(const char* agent) {
     if(!strcmp(agent,"claude-code") || !strcmp(agent,"claude")) return Theme::ClaudeBody;
@@ -195,6 +194,11 @@ static void caption(lv_obj_t* p,const char* s,int x,int y,int w,uint32_t color=T
     lv_obj_set_pos(l,x,y);lv_obj_set_width(l,w);
     lv_obj_set_style_text_font(l,&font_studio_20,0);
     lv_obj_set_style_text_color(l,lv_color_hex(color),0);
+}
+// ASCII label width from the public glyph API (usage rows are ASCII).
+static int textWidth(const char* s,const lv_font_t* font) {
+    int w=0;for(;*s;++s)w+=lv_font_get_glyph_width(font,static_cast<uint8_t>(*s),static_cast<uint8_t>(s[1]));
+    return w;
 }
 static void visible(lv_obj_t* o,bool v) {
     if(v) lv_obj_clear_flag(o,LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(o,LV_OBJ_FLAG_HIDDEN);
@@ -369,27 +373,35 @@ lv_obj_t* init(lv_obj_t* parent,const lv_image_dsc_t* (*glyph)(const char*)) {
     sceneW=w-324;
     overview=box(root,24,96,sceneW,h-174,Theme::DeepSea);lv_obj_set_style_bg_opa(overview,LV_OPA_TRANSP,0);
     resourcePane=box(root,w-276,96,252,h-176,Theme::DeepSea);lv_obj_set_style_bg_opa(resourcePane,LV_OPA_70,0);
-    caption(resourcePane,UsagePresentation::Heading,16,16,220,Theme::HUDText);
+    lv_obj_set_style_bg_opa(resourcePane,LV_OPA_TRANSP,0);
+    caption(resourcePane,UsagePresentation::Heading,4,16,220,Theme::HUDDim);   // baseline shared with the project title
     lv_obj_add_flag(resourcePane,LV_OBJ_FLAG_SCROLLABLE);lv_obj_set_scroll_dir(resourcePane,LV_DIR_VER);
-    for(int i=0;i<4;++i){caption(resourcePane,UsagePresentation::Providers[i],16,48,220,Theme::HUDText);providerNames[i]=lv_obj_get_child(resourcePane,-1);lv_obj_set_style_text_align(providerNames[i],LV_TEXT_ALIGN_LEFT,0);
-        label(providerPlan[i],resourcePane,16,72,220,&font_studio_16,Theme::HUDDim);
-        lv_label_set_long_mode(providerPlan[i].obj,LV_LABEL_LONG_DOT);
-        lv_obj_set_height(providerPlan[i].obj,font_studio_16.line_height);
+    lv_obj_set_scrollbar_mode(resourcePane,LV_SCROLLBAR_MODE_ACTIVE);
+    static const char* const usageAgents[UsageRows::MAX_GROUPS]={"claude-code","codex","zai","antigravity"};
+    for(int p=0;p<UsageRows::MAX_GROUPS;++p) {
+        auto& c=usageCards[p];
+        c.card=box(resourcePane,0,44,252,160,Theme::DeepSea);lv_obj_set_style_bg_opa(c.card,LV_OPA_80,0);
+        lv_obj_set_style_border_width(c.card,1,0);lv_obj_set_style_border_color(c.card,lv_color_hex(Theme::ShallowWater),0);
+        c.mark=lv_image_create(c.card);lv_obj_set_pos(c.mark,12,8);lv_obj_clear_flag(c.mark,LV_OBJ_FLAG_CLICKABLE);
+        lv_image_set_pivot(c.mark,0,0);lv_image_set_scale(c.mark,112);   // 64px mark → 28px
+        const auto* mark=glyphFor?glyphFor(usageAgents[p]):nullptr;visible(c.mark,mark);
+        if(mark){lv_image_set_src(c.mark,mark);
+            // Antigravity's mark is multi-colour; the others are recoloured masks.
+            if(p!=UsageRows::ANTIGRAVITY){lv_obj_set_style_image_recolor_opa(c.mark,LV_OPA_COVER,0);lv_obj_set_style_image_recolor(c.mark,lv_color_hex(brandColor(usageAgents[p])),0);}}
+        label(c.name,c.card,48,10,130,&font_studio_20,Theme::HUDText);lv_obj_set_height(c.name.obj,font_studio_20.line_height);c.name.set(UsagePresentation::Providers[p]);
+        label(c.plan,c.card,0,15,120,&font_studio_16,Theme::HUDText);
+        lv_obj_set_width(c.plan.obj,LV_SIZE_CONTENT);lv_label_set_long_mode(c.plan.obj,LV_LABEL_LONG_CLIP);
+        lv_obj_set_style_bg_color(c.plan.obj,lv_color_hex(Theme::ShallowWater),0);lv_obj_set_style_bg_opa(c.plan.obj,LV_OPA_COVER,0);
+        lv_obj_set_style_radius(c.plan.obj,LV_RADIUS_CIRCLE,0);lv_obj_set_style_pad_hor(c.plan.obj,10,0);lv_obj_set_style_pad_ver(c.plan.obj,2,0);
+        for(auto& sl:c.slot) {
+            label(sl.label,c.card,14,0,140,&font_studio_16,Theme::HUDDim);
+            label(sl.value,c.card,146,0,92,&font_studio_20,Theme::HUDText);lv_obj_set_style_text_align(sl.value.obj,LV_TEXT_ALIGN_RIGHT,0);
+            sl.track=box(c.card,14,0,224,8,Theme::ShallowWater);lv_obj_set_style_radius(sl.track,4,0);
+            sl.fill=box(sl.track,0,0,0,8,Theme::StatusCyan);lv_obj_set_style_radius(sl.fill,4,0);
+            label(sl.reset,c.card,14,0,224,&font_studio_16,Theme::HUDFaint);
+            lv_obj_set_height(sl.reset.obj,font_studio_16.line_height);
+        }
     }
-    for(int i=0;i<6;++i) {
-        quotaCards[i]=box(resourcePane,8,72,116,150,Theme::DeepSea);lv_obj_set_style_bg_opa(quotaCards[i],LV_OPA_TRANSP,0);
-        quotaBars[i]=lv_arc_create(quotaCards[i]);lv_obj_set_pos(quotaBars[i],7,0);lv_obj_set_size(quotaBars[i],100,100);
-        lv_arc_set_rotation(quotaBars[i],270);lv_arc_set_bg_angles(quotaBars[i],0,360);lv_arc_set_range(quotaBars[i],0,100);
-        lv_obj_remove_style(quotaBars[i],nullptr,LV_PART_KNOB);lv_obj_clear_flag(quotaBars[i],LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_style_arc_width(quotaBars[i],8,LV_PART_MAIN);lv_obj_set_style_arc_width(quotaBars[i],8,LV_PART_INDICATOR);
-        lv_obj_set_style_arc_color(quotaBars[i],lv_color_hex(Theme::ShallowWater),LV_PART_MAIN);
-        label(quotaValue[i],quotaCards[i],4,33,108,&font_studio_28,Theme::HUDText);lv_obj_set_style_text_align(quotaValue[i].obj,LV_TEXT_ALIGN_CENTER,0);
-        label(quotaWindow[i],quotaCards[i],4,103,108,&font_studio_16,Theme::HUDDim);lv_obj_set_style_text_align(quotaWindow[i].obj,LV_TEXT_ALIGN_CENTER,0);
-        label(quotaReset[i],quotaCards[i],4,124,108,&font_studio_16,Theme::HUDDim);lv_obj_set_style_text_align(quotaReset[i].obj,LV_TEXT_ALIGN_CENTER,0);
-    }
-    lunaMoon=box(quotaCards[2],4,4,22,22,Theme::HUDText);lv_obj_set_style_radius(lunaMoon,LV_RADIUS_CIRCLE,0);
-    auto* moonCut=box(lunaMoon,8,-3,20,20,Theme::DeepSea);lv_obj_set_style_radius(moonCut,LV_RADIUS_CIRCLE,0);
-    lv_obj_clear_flag(lunaMoon,LV_OBJ_FLAG_CLICKABLE);lv_obj_clear_flag(moonCut,LV_OBJ_FLAG_CLICKABLE);
     label(pageLabel,overview,0,0,sceneW,&font_studio_16,Theme::HUDDim);
     lv_obj_add_flag(pageLabel.obj,LV_OBJ_FLAG_CLICKABLE);lv_obj_add_event_cb(pageLabel.obj,pageCb,LV_EVENT_CLICKED,nullptr);
     for(int i=0;i<10;++i) {
@@ -449,7 +461,7 @@ void update() {
     if(lastUpdate && now-lastUpdate<250) return;
     lastUpdate=now?now:1;
     const uint32_t started=micros();
-    int totals[4]={}; float p5,p7,c5,c7; bool stale; uint16_t rosterTotal;bool rosterRotating;
+    int totals[4]={}; uint16_t rosterTotal;bool rosterRotating;
     lockState();
     connected=g_state.wsConnected || Net::serialConnected();
     gatewayReady=connected && g_state.gatewayConnected && !g_state.gatewayHasError;
@@ -498,25 +510,12 @@ void update() {
         const auto& e=g_state.timeline[idx];
         if(!strcmp(e.sessionId,selectedId)) events[eventCount++]=e;
     }
-    p5=g_state.fiveHourPercent;p7=g_state.sevenDayPercent;c5=g_state.codexPrimaryPercent;c7=g_state.codexSecondaryPercent;stale=g_state.usageStale;
-    quota.percent[0]=stale?-1:p5;quota.percent[1]=stale?-1:p7;quota.percent[2]=c5;quota.percent[3]=c7;
-    quota.percent[4]=g_state.zaiPrimaryPercent;quota.percent[5]=g_state.zaiSecondaryPercent;quota.mcp=g_state.zaiSecondaryIsMcp;
-    const char* resets[]={g_state.fiveHourReset,g_state.sevenDayReset,g_state.codexPrimaryReset,g_state.codexSecondaryReset,g_state.zaiPrimaryReset,g_state.zaiSecondaryReset};
-    for(int i=0;i<6;++i) snprintf(quota.reset[i],20,"%s",resets[i]);
-    snprintf(quota.plan,sizeof(quota.plan),"%s",g_state.antigravityPlan);
-    quota.luna=g_state.codexLunaPercent;
-    snprintf(quota.lunaReset,sizeof(quota.lunaReset),"%s",g_state.codexLunaReset);
-    memcpy(quota.minutes,g_state.codexWindowMinutes,sizeof(quota.minutes));
-    quota.subscriptionCount=g_state.subscriptionCount;
-    memcpy(quota.subscriptions,g_state.subscriptions,sizeof(quota.subscriptions));
+    usageGroupCount=UsageRows::build(g_state,usageGroups);
     unlockState();
     updateVoice(now,true);
     char text[240];
-    const bool luna=UsagePresentation::lunaActive(quota.percent[2],quota.percent[3],quota.luna);
-    if(luna){quota.percent[2]=quota.luna;quota.percent[3]=-1;snprintf(quota.reset[2],20,"%s",quota.lunaReset);}
-    bool hasSubscriptions=false;
-    for(int n=0;n<quota.subscriptionCount;++n)hasSubscriptions|=UsagePresentation::subscriptionProvider(quota.subscriptions[n].name)>=0;
-    const bool hasQuota=hasSubscriptions || quota.plan[0] || quota.percent[0]>=0 || quota.percent[1]>=0 || quota.percent[2]>=0 || quota.percent[3]>=0 || quota.percent[4]>=0 || quota.percent[5]>=0;
+    // Hide-if-absent: raw Antigravity credits alone never create the pane.
+    const bool hasQuota=usageGroupCount>0;
     sceneW=g_screenW-(hasQuota?316:48);
     visible(overview,overviewMode);visible(resourcePane,hasQuota);visible(rail,!overviewMode);visible(rosterTitle.obj,!overviewMode);
     const bool needsAttention=totals[1]>0 || !connected;
@@ -530,56 +529,43 @@ void update() {
         lv_obj_set_style_border_color(modeButtons[i],lv_color_hex(Theme::StatusCyan),0);
     }
     lv_obj_set_y(resourcePane,overviewMode?(needsAttention?178:130):g_screenW<1100?370:204);
-    // Six reused rings, with fixed geometry regardless of how many providers exist.
-    // Window labels explain the measure; reset text is secondary and optional.
-    constexpr int gaugeSize=64;
-    int quotaY=48;
-    for(int provider=0;provider<4;++provider) {
-        const int begin=provider*2,end=provider<3?begin+2:begin;
-        int knownCount=0;for(int i=begin;i<end;++i)knownCount+=quota.percent[i]>=0;
-        char plan[80]="";
-        for(int n=0;n<quota.subscriptionCount;++n) {
-            const auto& sub=quota.subscriptions[n];
-            if(UsagePresentation::subscriptionProvider(sub.name)!=provider)continue;
-            char name[40];if(provider==3)UsageFormat::formatAgyPlan(sub.name,name,sizeof(name));else snprintf(name,sizeof(name),"%s",sub.name);
-            snprintf(plan,sizeof(plan),"%s%s%s",name,sub.until[0]?" · ":"",sub.until);break;
-        }
-        if(provider==3 && !plan[0] && quota.plan[0])UsageFormat::formatAgyPlan(quota.plan,plan,sizeof(plan));
-        const bool shownProvider=knownCount || plan[0];
-        visible(providerNames[provider],shownProvider);visible(providerPlan[provider].obj,plan[0]);
-        if(shownProvider)lv_obj_set_y(providerNames[provider],quotaY);
-        providerPlan[provider].set(plan);lv_obj_set_y(providerPlan[provider].obj,quotaY+26);
-        const int ringY=quotaY+(plan[0]?52:30);
-        bool hasReset=false;
-        int col=0;
-        for(int i=begin;i<end;++i) {
-            const float p=quota.percent[i];const bool known=p>=0;visible(quotaCards[i],known);if(!known)continue;
-            lv_obj_set_pos(quotaCards[i],knownCount==1?68:8+col++*120,ringY);
-            lv_obj_set_size(quotaCards[i],116,136);
-            lv_obj_set_size(quotaBars[i],gaugeSize,gaugeSize);lv_obj_set_x(quotaBars[i],(116-gaugeSize)/2);
-            lv_obj_set_style_arc_width(quotaBars[i],6,LV_PART_MAIN);lv_obj_set_style_arc_width(quotaBars[i],6,LV_PART_INDICATOR);
-            lv_obj_set_y(quotaValue[i].obj,19);lv_obj_set_style_text_font(quotaValue[i].obj,&font_studio_20,0);
-            lv_obj_set_y(quotaWindow[i].obj,68);lv_obj_set_y(quotaReset[i].obj,88);
-            snprintf(text,sizeof(text),"%.0f%%",i==2 && luna?100-p:p);quotaValue[i].set(text);
-            lv_arc_set_value(quotaBars[i],i==2 && luna?100-static_cast<int>(p):p>100?100:static_cast<int>(p));
-            // Same meaning, same color across providers and both time windows.
-            lv_obj_set_style_arc_color(quotaBars[i],lv_color_hex(p>=90?Theme::StatusAmber:Theme::StatusCyan),LV_PART_INDICATOR);
-            const char* window=i==2 && luna?"Luna left":i==5 && quota.mcp?"MCP used":(i==2 || i==3) && quota.minutes[i-2]==0?"Credits used":i%2?"7d used":"5h used";
-            char timedWindow[24];
-            if((i==2 || i==3) && !(i==2 && luna) && quota.minutes[i-2]>0) {
-                const unsigned minutes=quota.minutes[i-2];
-                snprintf(timedWindow,sizeof(timedWindow),"%u%s used",minutes>=1440?minutes/1440:minutes>=60?minutes/60:minutes,minutes>=1440?"d":minutes>=60?"h":"m");window=timedWindow;
-            }
-            quotaWindow[i].set(window);
-            snprintf(text,sizeof(text),"Reset %s",quota.reset[i]);quotaReset[i].set(text);
-            visible(quotaReset[i].obj,quota.reset[i][0]);hasReset|=quota.reset[i][0]!=0;
-        }
-        if(shownProvider)quotaY=knownCount?ringY+(hasReset?114:94):quotaY+58;
-    }
-    visible(lunaMoon,luna);
-    // Bound a fully populated account list; sparse lists remain content-sized.
+    // Provider cards stack content-sized. A window row is one line —
+    // "5h used  ....  resets 2h 15m  42%" — over its bar, so three full
+    // providers fit the landscape pane without scrolling.
     const int quotaMax=g_screenH-lv_obj_get_y(resourcePane)-128;
-    lv_obj_set_height(resourcePane,quotaY+4>quotaMax?quotaMax:quotaY+4);
+    constexpr int HeaderH=44, RowH=42, CardGap=10, Top=52, BarW=224;
+    for(int p=0;p<UsageRows::MAX_GROUPS;++p)visible(usageCards[p].card,false);
+    int quotaY=Top;
+    for(int i=0;i<usageGroupCount;++i) {
+        const auto& g=usageGroups[i];auto& c=usageCards[g.provider];
+        const int h=HeaderH+g.rowCount*RowH+(g.rowCount?4:0);
+        visible(c.card,true);lv_obj_set_pos(c.card,0,quotaY);lv_obj_set_size(c.card,252,h);
+        // Plan pill: tier plus the subscription's active-until date.
+        UsageRows::planText(g,text,sizeof(text),"  ");c.plan.set(text);visible(c.plan.obj,text[0]);
+        lv_obj_align(c.plan.obj,LV_ALIGN_TOP_RIGHT,-12,11);
+        for(int s=0;s<2;++s) {
+            auto& sl=c.slot[s];const bool on=s<g.rowCount;
+            visible(sl.label.obj,on);visible(sl.value.obj,on);visible(sl.track,on);visible(sl.reset.obj,on);
+            if(!on)continue;
+            const auto& r=g.rows[s];const int y=HeaderH+s*RowH;
+            snprintf(text,sizeof(text),"%s %s",r.label,r.left?"left":"used");sl.label.set(text);
+            const int labelW=textWidth(text,&font_studio_16);
+            snprintf(text,sizeof(text),"%d%%",r.shown());sl.value.set(text);
+            const int valueW=textWidth(text,&font_studio_20);
+            lv_obj_set_y(sl.label.obj,y+1);lv_obj_set_y(sl.value.obj,y-2);lv_obj_set_y(sl.track,y+24);
+            lv_obj_set_width(sl.fill,r.shown()*BarW/100);
+            // Same meaning, same colour across providers; amber only near the limit.
+            lv_obj_set_style_bg_color(sl.fill,lv_color_hex(r.critical()?Theme::StatusAmber:Theme::StatusCyan),0);
+            // The faint reset countdown sits between label and percent,
+            // right-aligned — one line per window, same form on every row.
+            const int resetW=BarW-labelW-valueW-24;
+            sl.reset.set(r.reset);
+            lv_obj_set_pos(sl.reset.obj,14+labelW+12,y+1);lv_obj_set_width(sl.reset.obj,resetW>0?resetW:0);
+            lv_obj_set_style_text_align(sl.reset.obj,LV_TEXT_ALIGN_RIGHT,0);
+        }
+        quotaY+=h+CardGap;
+    }
+    lv_obj_set_height(resourcePane,quotaY>quotaMax?quotaMax:quotaY);
     projectCount=0;memset(podMembers,0,sizeof(podMembers));
     for(int i=0;i<count;++i) {
         podFor[i]=-1;if(!matches(rows[i]))continue;
@@ -783,7 +769,7 @@ void update() {
     if(elapsed>diag.maxUpdateUs)diag.maxUpdateUs=elapsed;
     diag.width=g_screenW;diag.height=g_screenH;diag.sessions=count;diag.visibleSessions=shown;
     diag.filter=filter;diag.eventCount=eventCount;diag.connected=connected;
-    diag.usageVisible=hasQuota;diag.quotaWindows=0;for(int i=0;i<6;++i)diag.quotaWindows+=quota.percent[i]>=0;diag.rosterTotal=rosterTotal;diag.rosterRotating=rosterRotating;
+    diag.usageVisible=hasQuota;diag.quotaWindows=0;for(int i=0;i<usageGroupCount;++i)diag.quotaWindows+=usageGroups[i].rowCount;diag.rosterTotal=rosterTotal;diag.rosterRotating=rosterRotating;
     diag.history=history;diag.voiceOpen=voiceOpen;diag.overview=overviewMode;diag.projects=projectCount;
     portEXIT_CRITICAL(&diagMux);
 }

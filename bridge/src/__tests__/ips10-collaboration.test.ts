@@ -79,7 +79,7 @@ describe('IPS10 stable card roster', () => {
 });
 
 describe('IPS10 quota transport fidelity', () => {
-  it('preserves a missing 5h slot, actual window lengths, Luna, and all subscription dates', () => {
+  it('preserves a missing 5h slot, actual window lengths, Luna (fleet-wide), and all subscription dates', () => {
     const usage = { type: 'usage_update', codexRateLimits: {
       secondary: { usedPercent: 100, windowMinutes: 10080 },
       lunaReserve: { usedPercent: 32, resetsAt: '2099-01-01T00:00:00Z' },
@@ -90,6 +90,8 @@ describe('IPS10 quota transport fidelity', () => {
     expect(out.codexRateLimits.lunaReserve.usedPercent).toBe(32);
     expect(out.subscriptions).toHaveLength(4);
     expect(out.subscriptions[3].until).toContain('2/3');
-    expect((prepareForSerial(usage) as any).codexRateLimits.lunaReserve).toBeUndefined();
+    // Every board renders the reserve now (esp32/src/util/usage_rows.h), so the
+    // whitelist forwards it regardless of the connected board.
+    expect((prepareForSerial(usage) as any).codexRateLimits.lunaReserve.usedPercent).toBe(32);
   });
 });

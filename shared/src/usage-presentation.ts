@@ -16,6 +16,29 @@ export function usageSubscriptionProvider(name: string): number {
   return USAGE_PRESENTATION.providers.findIndex(p => p.prefixes.some(prefix => key.startsWith(prefix.toLowerCase())));
 }
 
+/** Characters that may separate a provider prefix from its tier ("GLM Coding Plan · Lite"). */
+export const USAGE_TIER_SEPARATORS = ' ·:-';
+
+/** The plan tier a surface prints beside its provider's brand mark: the
+ *  subscription name without the provider prefix ("ChatGPT Pro" → "Pro",
+ *  "GLM Coding Plan · Lite" → "Lite"). The brand mark already names the
+ *  provider, so repeating it wastes the space a missing window frees. A
+ *  prefix-only name ("Claude") has no tier and yields "" — surfaces then
+ *  omit it rather than print the provider twice. An unattributed name is
+ *  returned whole. */
+export function usageSubscriptionTier(name: string): string {
+  const trimmed = name.trim();
+  const key = trimmed.toLowerCase();
+  for (const provider of USAGE_PRESENTATION.providers) {
+    const prefix = provider.prefixes.find(v => key.startsWith(v.toLowerCase()));
+    if (!prefix) continue;
+    let tail = trimmed.slice(prefix.length);
+    while (tail && USAGE_TIER_SEPARATORS.includes(tail[0])) tail = tail.slice(1);
+    return tail.trim();
+  }
+  return trimmed;
+}
+
 /** A reported extra pool alone does not mean the account has exhausted quota.
  * Unknown/ended windows are -1, zero is valid. The next account snapshot restores
  * ordinary windows as soon as neither is exhausted. An exhausted reserve is

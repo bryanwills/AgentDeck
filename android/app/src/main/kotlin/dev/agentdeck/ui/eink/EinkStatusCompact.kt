@@ -164,7 +164,7 @@ private fun CodexGaugeRow(row: ProviderLimitRow) {
             fontSize = 13.sp,
             lineHeight = 17.sp,
             fontFamily = FontFamily.Monospace,
-            color = gaugeColor(row.percent),
+            color = gaugeColor(row.usedPercent),
             maxLines = 1,
         )
     }

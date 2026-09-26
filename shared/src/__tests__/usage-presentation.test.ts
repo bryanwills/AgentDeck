@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { USAGE_PRESENTATION, usageLunaActive, selectedLunaReserve, usageSubscriptionProvider } from '../usage-presentation.js';
+import { USAGE_PRESENTATION, USAGE_TIER_SEPARATORS, usageLunaActive, selectedLunaReserve, usageSubscriptionProvider, usageSubscriptionTier } from '../usage-presentation.js';
 // @ts-expect-error executable generator has no TypeScript declaration
 import { outputs } from '../../../scripts/generate-usage-presentation.mjs';
 const window = (usedPercent: number, stale = false) => ({ usedPercent, stale, windowMinutes: 300 });
@@ -24,7 +24,13 @@ describe('shared usage display policy', () => {
       expect(usageSubscriptionProvider(name)).toBe(index);
     }
   });
+  it('prints the plan tier beside the brand mark, never the provider twice', () => {
+    // A live daemon reports Claude's subscription as the bare name "Claude".
+    for (const [name, tier] of [['Claude Max','Max'], ['ChatGPT Pro','Pro'], ['GLM Coding Plan · Lite','Lite'], ['Google AI Ultra','Ultra'], ['Claude',''], ['Claude ',''], ['Unknown plan','Unknown plan']] as const) {
+      expect(usageSubscriptionTier(name)).toBe(tier);
+    }
+  });
   it('generates the firmware predicate and provider table from the actual source', () => {
-    for (const [target, emit] of outputs) expect(readFileSync(new URL(`../../../${target}`, import.meta.url), 'utf8')).toBe(emit(USAGE_PRESENTATION, usageLunaActive.toString()));
+    for (const [target, emit] of outputs) expect(readFileSync(new URL(`../../../${target}`, import.meta.url), 'utf8')).toBe(emit(USAGE_PRESENTATION, usageLunaActive.toString(), USAGE_TIER_SEPARATORS));
   });
 });

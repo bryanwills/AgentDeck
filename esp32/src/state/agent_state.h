@@ -190,11 +190,11 @@ struct DashboardState {
     int codexSecondaryMinutes;
     char codexPrimaryReset[20];    // "1h 23m" relative (needs NTP) or ""
     char codexSecondaryReset[20];
-#if defined(BOARD_IPS10)
+    // Luna-only reserve pool (usage_update codexRateLimits.lunaReserve). It
+    // replaces the Codex windows only while an account window is exhausted —
+    // UsagePresentation::lunaActive owns that rule. -1 = absent.
     float codexLunaPercent = -1;
     char codexLunaReset[20] = {};
-    uint16_t codexWindowMinutes[2] = {300, 10080};
-#endif
     // z.ai GLM Coding Plan limits (#350) — a direct provider-account reading,
     // same slot grammar. The secondary window may meter MCP TOOL CALLS, not
     // tokens: `zaiSecondaryIsMcp` rides the wire `quantity` and renderers must
@@ -329,10 +329,7 @@ struct DashboardState {
         codexSecondaryPercent = -1.0f;
         codexPrimaryReset[0] = '\0';
         codexSecondaryReset[0] = '\0';
-#if defined(BOARD_IPS10)
         codexLunaPercent = -1; codexLunaReset[0] = '\0';
-        codexWindowMinutes[0] = 300; codexWindowMinutes[1] = 10080;
-#endif
         zaiPrimaryPercent = -1.0f;
         zaiSecondaryPercent = -1.0f;
         zaiPrimaryReset[0] = '\0';
@@ -376,10 +373,7 @@ struct DashboardState {
         codexSecondaryPercent = -1.0f;
         codexPrimaryReset[0] = '\0';
         codexSecondaryReset[0] = '\0';
-#if defined(BOARD_IPS10)
         codexLunaPercent = -1; codexLunaReset[0] = '\0';
-        codexWindowMinutes[0] = 300; codexWindowMinutes[1] = 10080;
-#endif
         zaiPrimaryPercent = -1.0f;
         zaiSecondaryPercent = -1.0f;
         zaiPrimaryReset[0] = '\0';

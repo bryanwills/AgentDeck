@@ -19,4 +19,29 @@ inline int subscriptionProvider(const char* name) {
     if (startsWith(name, "Google AI") || startsWith(name, "Antigravity") || startsWith(name, "AGY")) return 3;
     return -1;
 }
+// usageSubscriptionTier: the subscription name without its provider prefix.
+inline void subscriptionTier(const char* name, char* out, size_t outLen) {
+    if (!out || outLen == 0) return;
+    out[0] = '\0';
+    if (!name) return;
+    while (*name == ' ') ++name;
+    static constexpr const char* prefixes[] = {"Claude","ChatGPT","Codex","GLM Coding Plan","z.ai","Google AI","Antigravity","AGY"};
+    const char* tail = nullptr;
+    for (const char* prefix : prefixes) if (startsWith(name, prefix)) { tail = name + std::strlen(prefix); break; }
+    if (tail) {
+        // Separators: " ·:-" (UTF-8 middle dot is two bytes).
+        for (;;) {
+            if (*tail && std::strchr(" :-", *tail)) { ++tail; continue; }
+            if (static_cast<unsigned char>(tail[0]) == 0xC2 && static_cast<unsigned char>(tail[1]) == 0xB7) { tail += 2; continue; }
+            break;
+        }
+    }
+    // A prefix-only name ("Claude") has no tier: leave it empty.
+    const char* src = tail ? tail : name;
+    size_t n = std::strlen(src);
+    while (n && src[n - 1] == ' ') --n;
+    if (n >= outLen) n = outLen - 1;
+    std::memcpy(out, src, n);
+    out[n] = '\0';
+}
 }

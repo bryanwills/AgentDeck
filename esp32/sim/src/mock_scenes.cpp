@@ -229,6 +229,39 @@ bool SimScenes::apply(const char* name) {
     addTimeline("chat_response", "s0-OpenClaw", "사용량 표시를 개선했습니다.\n다음 줄도 같은 행에 표시합니다.", nullptr);
     return true;
   }
+  // Codex account window exhausted with a Luna reserve reported: every
+  // USAGE surface swaps the Codex windows for the reserve ("% left"), and the
+  // plan fills the slot the second window leaves.
+  if (std::strcmp(name, "codex-luna") == 0) {
+    base(CreatureState::FLOATING);
+    g_state.codexPrimaryPercent = 100;
+    setStr(g_state.codexPrimaryReset, sizeof(g_state.codexPrimaryReset), "1h 10m");
+    g_state.codexSecondaryPercent = 62;
+    g_state.codexLunaPercent = 32;
+    setStr(g_state.codexLunaReset, sizeof(g_state.codexLunaReset), "4h 50m");
+    setStr(g_state.subscriptions[1].name, sizeof(g_state.subscriptions[1].name), "ChatGPT Pro");
+    setStr(g_state.subscriptions[1].until, sizeof(g_state.subscriptions[1].until), "~8/14");
+    g_state.subscriptionCount = 2;
+    return true;
+  }
+  // The live daemon mix measured 2026-09-26: Claude reported as a bare
+  // "Claude" subscription (no tier), Codex Pro with no 5h window, z.ai MCP
+  // exhausted, Antigravity plan-only.
+  if (std::strcmp(name, "live-mix") == 0) {
+    base(CreatureState::FLOATING);
+    g_state.fiveHourPercent = 12; g_state.sevenDayPercent = 87;
+    g_state.codexPrimaryPercent = -1; g_state.codexSecondaryPercent = 83;
+    setStr(g_state.codexSecondaryReset, sizeof(g_state.codexSecondaryReset), "4d 2h");
+    g_state.zaiPrimaryPercent = 7; g_state.zaiSecondaryPercent = 100; g_state.zaiSecondaryIsMcp = true;
+    const char* subs[][2] = {{"ChatGPT Pro", "~10/10"}, {"Claude", ""}, {"GLM Coding Plan \xC2\xB7 Max", ""}, {"Google AI Pro", ""}};
+    for (int i = 0; i < 4; ++i) {
+      setStr(g_state.subscriptions[i].name, sizeof(g_state.subscriptions[i].name), subs[i][0]);
+      setStr(g_state.subscriptions[i].until, sizeof(g_state.subscriptions[i].until), subs[i][1]);
+    }
+    g_state.subscriptionCount = 4;
+    setStr(g_state.antigravityPlan, sizeof(g_state.antigravityPlan), "Google AI Pro");
+    return true;
+  }
   if (std::strcmp(name, "idle") == 0) {
     base(CreatureState::FLOATING);
     addSession("claude-code", "idle", "AgentDeck");
@@ -410,6 +443,6 @@ bool SimScenes::apply(const char* name) {
 }
 
 const char* SimScenes::catalog() {
-  return "usage-all, zai-only, usage-none, usage-zero, usage-stale, codex-only, empty, idle, display-off, working, multi, crowd, crowded, dense, permission, attention, "
+  return "usage-all, zai-only, usage-none, usage-zero, usage-stale, codex-only, codex-luna, live-mix, empty, idle, display-off, working, multi, crowd, crowded, dense, permission, attention, "
          "demo:<agent>:<state>";
 }

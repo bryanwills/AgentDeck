@@ -150,7 +150,7 @@ bool renderScene(const char* scene, const char* path, int frames, const char* pa
   g_sim_millis = 0;
 #if defined(BOARD_T_DISPLAY_PRO)
   // Physical rocker navigation, exercised without a hand-authored preview.
-  // Attention scenes still correctly snap back to Focus inside update().
+  // Attention updates the rail without taking over the current page.
   if (std::strcmp(page, "usage") == 0) Ticker::nextPage();
   else if (std::strcmp(page, "sessions") == 0) {
     Ticker::nextPage();
@@ -165,15 +165,13 @@ bool renderScene(const char* scene, const char* path, int frames, const char* pa
     SimDisplay::refresh();
   }
 #if defined(BOARD_T_EMBED)
-  if (std::strcmp(scene, "attention") == 0 && Knob::selectedSessionIdx() != 1) {
-    std::fprintf(stderr, "[sim] attention regression: selected=%d, expected awaiting session 1\n",
-                 Knob::selectedSessionIdx());
-    return false;
-  }
   if (std::strcmp(scene, "attention") == 0) {
-    // The daemon's roster is not a stable array. Automatic pager focus must
-    // follow the awaiting session ID when its index changes, instead of
-    // falling back to the idle OpenClaw card now occupying the old index.
+    // New attention does not steal a local desk view. Deliberate rotation
+    // selects the waiting task, whose identity must survive roster reordering.
+    if (Knob::selectedSessionIdx() != 0) return false;
+    Knob::onRotate(1);
+    Knob::update(FRAME_DT);
+    if (Knob::selectedSessionIdx() != 1) return false;
     SessionInfo swap = g_state.sessions[0];
     g_state.sessions[0] = g_state.sessions[1];
     g_state.sessions[1] = swap;
@@ -370,16 +368,16 @@ bool verifyIpsInteractions(const char* outdir) {
   g_state.usageStale=false;g_state.fiveHourPercent=42;g_state.sevenDayPercent=68;g_state.codexPrimaryPercent=23;g_state.codexSecondaryPercent=44;
   g_state.zaiPrimaryPercent=12;g_state.zaiSecondaryPercent=7;g_state.zaiSecondaryIsMcp=true;g_state.antigravityCredits=812;advance();
   std::snprintf(g_state.antigravityPlan,sizeof(g_state.antigravityPlan),"Google AI Pro");advance();
-  if(!ipsLabel(lv_screen_active(),"MCP used") || ipsLabel(lv_screen_active(),"812") || ipsLabel(lv_screen_active(),"credits") || !ipsLabel(lv_screen_active(),"AGY Pro"))return ipsFailure(__LINE__);
+  if(!ipsLabel(lv_screen_active(),"MCP used") || ipsLabel(lv_screen_active(),"812") || ipsLabel(lv_screen_active(),"credits") || !ipsLabel(lv_screen_active(),"Antigravity"))return ipsFailure(__LINE__);
   if(IPS10Workspace::diagnostics().quotaWindows!=6 || !save("ips10-all-providers"))return ipsFailure(__LINE__);
   lv_obj_get_coords(lv_obj_get_parent(ipsLabel(lv_screen_active(),"USAGE")),&bounds);
   if(bounds.y2>=g_screenH-56)return ipsFailure(__LINE__);
   // Raw credits alone must not create a quota rail, a number, or a plan chip.
   g_state.fiveHourPercent=g_state.sevenDayPercent=g_state.codexPrimaryPercent=g_state.codexSecondaryPercent=g_state.zaiPrimaryPercent=g_state.zaiSecondaryPercent=-1;
   g_state.antigravityCredits=1000;g_state.antigravityPlan[0]=0;g_state.subscriptionCount=0;advance();
-  if(IPS10Workspace::diagnostics().usageVisible || IPS10Workspace::diagnostics().quotaWindows || ipsLabel(lv_screen_active(),"AGY Pro") || ipsLabel(lv_screen_active(),"credits"))return ipsFailure(__LINE__);
+  if(IPS10Workspace::diagnostics().usageVisible || IPS10Workspace::diagnostics().quotaWindows || ipsLabel(lv_screen_active(),"Antigravity") || ipsLabel(lv_screen_active(),"credits"))return ipsFailure(__LINE__);
   std::snprintf(g_state.antigravityPlan,sizeof(g_state.antigravityPlan),"Google AI Pro");advance();
-  if(!ipsLabel(lv_screen_active(),"AGY Pro") || !IPS10Workspace::diagnostics().usageVisible || !save("ips10-plan-only"))return ipsFailure(__LINE__);
+  if(!ipsLabel(lv_screen_active(),"Antigravity") || !IPS10Workspace::diagnostics().usageVisible || !save("ips10-plan-only"))return ipsFailure(__LINE__);
   // Reserve is selected only while a real regular limit is exhausted.
   g_state.codexPrimaryPercent=100;g_state.codexLunaPercent=32;advance();
   if(!ipsLabel(lv_screen_active(),"Luna left") || !ipsLabel(lv_screen_active(),"68%") || !save("ips10-luna"))return ipsFailure(__LINE__);
