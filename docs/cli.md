@@ -19,9 +19,9 @@ default) aggregates all sessions for external clients.
 > **Legacy compatibility notice:** `agentdeck claude`, `agentdeck codex`,
 > `agentdeck opencode`, and `agentdeck monitor` still work, and no removal date
 > is set. The daemon-first default is `agentdeck daemon install` followed by a
-> normal agent launch. Remote attach, `AGENTDECK_<AGENT>_ARGS`,
-> terminal steering, and terminal telemetry do not have daemon-first
-> equivalents yet; for session ordering use `agentdeck order` (below).
+> normal agent launch. Custom launch arguments can also use `agentdeck run`
+> without a PTY (below). Remote attach, terminal steering, and terminal-only
+> telemetry still require the managed path; observed ordering uses `agentdeck order`.
 > Replacement design is discussed in
 > [Discussion #278](https://github.com/puritysb/AgentDeck/discussions/278) and
 > implementation remains tracked in
