@@ -66,6 +66,107 @@ the plan filling the slot a missing window leaves) had drifted on the other surf
 - Pixoo keeps showing the exhausted window: a 64×64 rail has no room to label a
   reserve percentage, so Luna would read as the 5h window.
 
+## 2026-09-26 — Round AMOLED lost both transports; link observability
+
+## Incident
+
+The round AMOLED (`round_amoled` 1.4.0, `/dev/cu.usbmodem211201`, 192.168.68.55) showed missing creatures and usage, as if its connection were unstable. It was not rebooting: uptime had been 354,346 s with no `reboot observed` line. Both transports were failing at once:
+
+- **Wi-Fi:** 78–80% ICMP loss with RTT up to 3.3 s, against 0–15% on four other boards at the same moment. Routing and ARP on the Mac were identical for all of them. The daemon held no TCP socket to the board for long stretches, and `esp32Wifi.stale` (over 90 s silent) kept recurring. Over 2026-09-21 → 24 the board came back from staleness 27–33 times a day.
+- **USB:** the port opened and host→board writes succeeded, but the board sent nothing back, not even to a direct `device_info_request`. The health view's serial `deviceInfo` was the cache seed (uptime frozen), not a live read. The daemon recycled the port as half-open every 120 s and denylisted it for 10 minutes after three strikes. All of this was logged at debug level only.
+
+Replugging USB power-cycled the board (`reset=poweron`), and serial answered at once. So the USB silence was a board-side HWCDC transmit wedge that a host-side reopen cannot clear on a native-USB board. Ping loss fell to 37% after the reboot, still the worst on the network (the peer read 17% then), so the radio link itself is weak where the board sits.
+
+## Changes
+
+- `device_info` carries `rssiDbm` (WiFi.RSSI(), only while associated) from both firmware ladders. The daemon keeps it on serial and Wi-Fi records, exposes it in `/health` `esp32Wifi` and `/devices`, and prints it in `agentdeck devices`. A weak radio can now be told apart from a daemon fault without ping sweeps.
+- The serial half-open recycle and the denylist of a port that was previously identified as an AgentDeck board now log at info level. A foreign device's denylist stays at debug.
+
+## Validation and delivery scope
+
+`pnpm build`, `pnpm typecheck` and `pnpm test` pass; `generate-protocol` leaves no drift. Firmware compiled for amoled, ttgo, led8x32, ips10 and esp32_c6_147. No board was flashed, and the Swift daemon does not yet surface `rssiDbm`.
+
+## 2026-09-26 — OpenClaw adapter wedge: reconnect after a dead socket
+
+### Incident
+
+At 00:16 KST OpenClaw restarted itself (`gateway.restart`). The Node daemon's 5 s probe saw port 18789 open again and connected before the Gateway logged `gateway ready`, and the Gateway logged `closed before connect (handshake pending)`. The daemon log ended at `OpenClaw Gateway detected, connecting...`, `/health` reported `gateway: "disconnected"`, and OpenClaw was missing from every surface until a manual `agentdeck daemon restart`. This is the same wedge as 2026-09-16 (16.5 h).
+
+### Cause
+
+The daemon builds its adapter with `autoReconnect:false` and relied on the probe to replace it. The adapter never emitted `'exit'`, so the daemon's `adapter.on('exit', …)` cleanup was dead wiring. `startGatewayProbe` fired its connect callback only on the port's rising edge. While the Gateway process stays up, a dead socket therefore leaves a dead adapter forever.
+
+### Fix
+
+- The adapter emits `'exit'` when a non-reconnecting socket closes, and closes the socket on handshake failure or timeout.
+- The probe calls `onAvailable` on every tick the port answers. The callee is idempotent. `onDisappeared` still fires only on the falling edge.
+- The daemon only tears down the adapter if the `'exit'` comes from the current one. Adapters that die before completing the handshake back off exponentially from 5 s to 300 s.
+- The Swift daemon's adapter runs its own reconnect loop and is not affected.
+
+### Validation
+
+`bridge/src/__tests__/openclaw-gateway-wedge.test.ts`: 2 of 3 fail without the fix and all pass with it. Build, typecheck and the full vitest suite pass. PR #380.
+
+## 2026-09-26 — Consolidate local work and audit outstanding issues
+
+The owner ended the other sessions and authorized repository cleanup and remaining
+issue work. A full Git bundle and ordinary-directory copies of all 21 retired
+worktrees preserve every original ref, uncommitted Blender file, ignored build
+output and diagnostic artifact. Browser captures were moved into the same local
+archive. No user files were discarded. Retired local branch names were removed
+after bundle verification; the held release PR remains on GitHub.
+
+## Integration decisions
+
+Tree-level comparison showed the apparent unmerged Claude recovery, Dashboard,
+store submission/preview, validation receipt and README work was already present
+through squash commits or superseded by newer master edits. Preserve the newer
+master content instead of replaying those branches. The recovery executable and
+its tests exactly matched master, including the locally unique review commit.
+
+- PR #380: merge OpenClaw dead-socket exit reporting, handshake cleanup and
+  level-triggered bounded reconnection. A listening Gateway port no longer hides
+  a dead adapter indefinitely.
+- PR #381: merge optional WiFi RSSI and visible identified-serial failure logs,
+  retaining fleet-wide Luna forwarding. Reject fractional near-zero readings
+  that would round to invalid 0 dBm; regression fixture covers this boundary.
+- PR #378: retain the provisional npm 1.4.3 / Apple 1.5.1 release candidate and
+  its receipts in the remote draft and the archive. The documented publication
+  hold is unchanged; no tag, package/store upload or submission is triggered.
+- The standalone commercialization research document is preserved in the archive;
+  cleanup does not republish personal research or its unverified external claims.
+
+## Issue triage
+
+- #370: preferred-port recovery is implemented and live-tested; remaining scope
+  is publication, covered by the held release candidate.
+- #367: the fix is published; original Windows multi-session confirmation is
+  still missing. No macOS result substitutes for that receipt.
+- #303: no reproducible Windows transport trace is available; keep open.
+- #349 / #314: physical processed-package encoder interaction and store delivery
+  gates remain open. Build success is not physical verification or publication.
+- #348: detailed model/tool timeseries remains consumer-gated; no speculative
+  producer or new quota semantics are added.
+- #273: managed commands remain supported. Real remote topologies and replacement
+  decisions are required before removing compatibility paths.
+- #272: current desk panels expose fresh board-specific repaint counters;
+  short samples are diagnostic evidence, not delivery counts, refresh-interval
+  percentiles or representative approval traffic. EPD47 was still running with
+  advancing repaint count about 3.6 hours after the earlier firmware recovery.
+
+## Validation
+
+Combined build/typecheck succeeded; 4,763 tests passed with two skipped.
+Protocol generation has no drift; token mirrors match. Actual AMOLED firmware
+compiled successfully with the added WiFi telemetry. Other running boards retain
+their previously verified firmware; old firmware may omit RSSI by contract.
+
+The first combined macOS CI run exposed a stale native Luna fixture inherited
+from the earlier usage change: it expected a reserve to replace account windows
+at 30%/10%. The fixture now exhausts a live window before expecting Luna and also
+asserts that reset account windows return even while the reserve remains reported.
+Production selection logic is unchanged.
+
 ## 2026-09-26 — IPS10 display, WiFi and internal heap recovery
 
 ## Failure and evidence

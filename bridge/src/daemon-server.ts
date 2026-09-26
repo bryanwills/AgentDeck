@@ -243,7 +243,7 @@ import {
   describeDaemonPosture,
   resolveDaemonPosture,
 } from './network-posture.js';
-import { esp32ConnectionCount, getESP32DeviceInfo, onESP32Message, sendAuthProvisionToAll, sendWifiProvision, sendWifiProvisionToAll, handleESP32Wake, getESP32Ports, getSerialConnectionStatus, getSerialLastError, getSerialReachableBoards, releaseESP32SerialPorts } from './esp32-serial.js';
+import { esp32ConnectionCount, getESP32DeviceInfo, onESP32Message, sendAuthProvisionToAll, sendWifiProvision, sendWifiProvisionToAll, handleESP32Wake, getESP32Ports, getSerialConnectionStatus, getSerialLastError, getSerialReachableBoards, releaseESP32SerialPorts, sanitizeRssiDbm } from './esp32-serial.js';
 import { clampLeaseSeconds, clearLease, readLease, writeLease } from './esp32-flash-lease.js';
 import { loadWifiConfig } from './wifi-config.js';
 import { getAdbDeviceCountCached, getCachedAdbDevices } from './adb-reverse.js';
@@ -361,6 +361,7 @@ interface WifiEsp32Device {
   fullRefreshCount?: number;
   usageCodex5H?: number;
   usageCodex7D?: number;
+  rssiDbm?: number;
   lastSeenMs: number;
 }
 const wifiEsp32Devices = new Map<string, WifiEsp32Device>();
@@ -790,6 +791,7 @@ function registerWifiEsp32(d: Record<string, unknown>, ws: WebSocket): void {
     usageCodex7D: typeof d.usageCodex7D === 'number' ? d.usageCodex7D : undefined,
     repaintCount: typeof d.repaintCount === 'number' ? d.repaintCount : undefined,
     fullRefreshCount: typeof d.fullRefreshCount === 'number' ? d.fullRefreshCount : undefined,
+    rssiDbm: sanitizeRssiDbm(d.rssiDbm),
     lastSeenMs: Date.now(),
   });
   wifiEsp32Sockets.set(key, ws);
@@ -1388,6 +1390,7 @@ function buildNodeModuleHealth(startedModules: DeviceModule[]): Record<string, u
         processingCount: status.processingCount,
         repaintCount: status.repaintCount,
         fullRefreshCount: status.fullRefreshCount,
+        rssiDbm: status.rssiDbm,
         deviceInfoFresh: status.deviceInfoFresh,
       } : null,
       lastReadAt: status.lastReadAt,
@@ -1698,6 +1701,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   // when the first /health request arrives.
   let gatewayAdapter: OpenClawAdapter | null = null;
   let gatewayConnecting = false;
+  // Backoff for adapters that die before their handshake completes (Gateway
+  // still booting, auth refused). The probe retries on every tick while the
+  // port is open, so without this a refusing Gateway is dialled every 5 s.
+  let gatewayFailedAttempts = 0;
+  let gatewayRetryAtMs = 0;
   let moduleHealthProvider: () => Record<string, unknown> = () => ({});
 
   // Gateway-local activity state for the virtual `openclaw-gateway` session row.
@@ -4525,6 +4533,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
           usageCodex7D: d.usageCodex7D ?? null,
           repaintCount: d.repaintCount ?? null,
           fullRefreshCount: d.fullRefreshCount ?? null,
+          rssiDbm: d.rssiDbm ?? null,
         })),
       };
     }
@@ -5053,6 +5062,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
 
   function connectGatewayAdapter(): void {
     if (gatewayAdapter || gatewayConnecting) return;
+    if (Date.now() < gatewayRetryAtMs) return;
     gatewayConnecting = true;
     log('[agentdeck] OpenClaw Gateway detected, connecting...');
 
@@ -5236,6 +5246,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
             core.cachedGatewayAuthStatus = 'connected';
             gatewaySessionState = 'idle';
             bridgeLogStream.start();
+            gatewayFailedAttempts = 0;
+            gatewayRetryAtMs = 0;
             log('[agentdeck] OpenClaw Gateway connected');
             settleGatewayInstability(Date.now());
             if (core.stateMachine.getSnapshot().state === 'disconnected') {
@@ -5272,7 +5284,23 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
       }
     });
 
-    adapter.on('exit', () => disconnectGatewayAdapter());
+    // The adapter runs without autoReconnect, so 'exit' (its socket closed) is
+    // final: drop it so the next probe tick can dial a fresh one. Guarded by
+    // identity — a late exit from a replaced adapter must not tear down its
+    // successor.
+    let everConnected = false;
+    adapter.on('event', (evt: AdapterEvent) => {
+      if (evt.source === 'connection' && evt.status === 'connected') everConnected = true;
+    });
+    adapter.on('exit', () => {
+      if (!everConnected) {
+        gatewayFailedAttempts += 1;
+        const delayMs = Math.min(5000 * 2 ** (gatewayFailedAttempts - 1), 300_000);
+        gatewayRetryAtMs = Date.now() + delayMs;
+        log(`[agentdeck] OpenClaw Gateway handshake did not complete; retrying in ${Math.round(delayMs / 1000)}s`);
+      }
+      if (gatewayAdapter === adapter) disconnectGatewayAdapter();
+    });
 
     adapter.start({ port, externalServer: httpServer } as any).then(() => {
       gatewayAdapter = adapter;
@@ -6871,6 +6899,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<void> {
   core.startOllamaProbe();
   core.startMlxProbe();
   core.startAntigravityProbe();
+  // Level-triggered: `onAvailable` runs on every tick the port is open, and
+  // connectGatewayAdapter's own guards make it a no-op while an adapter lives.
   core.startGatewayProbe(5000,
     () => connectGatewayAdapter(),
     () => { if (gatewayAdapter && !gatewayAdapter.isAlive()) disconnectGatewayAdapter(); },

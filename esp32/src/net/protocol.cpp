@@ -1244,6 +1244,7 @@ static void sendDeviceInfo() {
 #endif
     if (Net::wifiConnected()) {
         resp["ip"] = Net::wifiLocalIP();
+        resp["rssiDbm"] = Net::wifiRssiDbm();
     }
 #if defined(BOARD_T_EMBED)
     {

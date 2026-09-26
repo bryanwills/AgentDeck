@@ -32,7 +32,7 @@ import { SERIAL_FORWARDED_EVENTS } from '@agentdeck/shared/protocol';
 import type { AuthProvisionMessage, ESP32ToHostMessage, WifiProvisionMessage } from '@agentdeck/shared/protocol';
 import { formatResetTime, truncateUtf8Bytes } from '@agentdeck/shared';
 import { readLease } from './esp32-flash-lease.js';
-import { debug, logTagged } from './logger.js';
+import { debug, log, logTagged } from './logger.js';
 
 /** @internal Exported for testing only */
 export const ESP32_PORT_PATTERNS = [
@@ -173,6 +173,7 @@ export interface SerialConnection {
     processingCount?: number;
     repaintCount?: number;
     fullRefreshCount?: number;
+    rssiDbm?: number;
     /** Peripheral telemetry/diag (capability-advertising boards). */
     capabilities?: string[];
     batteryPercent?: number;
@@ -913,6 +914,7 @@ export function handleSerialLine(conn: SerialConnection, line: string): void {
           processingCount: (msg as any).processingCount,
           repaintCount: (msg as any).repaintCount,
           fullRefreshCount: (msg as any).fullRefreshCount,
+          rssiDbm: sanitizeRssiDbm(msg.rssiDbm),
           capabilities: (msg as any).capabilities,
           batteryPercent: (msg as any).batteryPercent,
           batteryVoltageMv: (msg as any).batteryVoltageMv,
@@ -1374,10 +1376,23 @@ export function shouldRetryDeviceInfoIdentify(
   return true;
 }
 
+/** A board-reported RSSI in dBm, or undefined when absent or implausible. */
+export function sanitizeRssiDbm(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < -120 || value >= 0) return undefined;
+  const rounded = Math.round(value);
+  return rounded < 0 ? rounded : undefined;
+}
+
 function denylistForeignPort(port: string, reason: string): void {
   foreignDenylistUntil.set(port, Date.now() + FOREIGN_DENYLIST_COOLDOWN_MS);
   foreignProbeFailures.delete(port);
-  debug('ESP32', `Denylisting non-AgentDeck port ${port} for ${Math.round(FOREIGN_DENYLIST_COOLDOWN_MS / 60000)}min (${reason})`);
+  const minutes = Math.round(FOREIGN_DENYLIST_COOLDOWN_MS / 60000);
+  // An identified AgentDeck board reaching the denylist means its USB link is
+  // dead in one direction; that is a user-visible outage, not probe noise
+  // (2026-09-26: a round AMOLED sat here silently for hours on debug-only logs).
+  const board = lastKnownDeviceInfoByPort.get(port)?.board;
+  if (board) log(`ESP32 serial ${port} (${board}) sends nothing back — skipping it for ${minutes}min (${reason})`);
+  else debug('ESP32', `Denylisting non-AgentDeck port ${port} for ${minutes}min (${reason})`);
 }
 
 /** @internal Exported for testing only. True if the port is in active cooldown. */
@@ -1434,7 +1449,7 @@ function checkStaleConnections(): void {
       // probe-failure counter so a permanently-dead board denylists after a few
       // strikes instead of getting DTR/RTS-reset every grace window.
       if (isHalfOpenIdentifiedCdc(conn, now)) {
-        debug('ESP32', `Half-open CDC (identified, no read since connect): ${conn.port} — recycling`);
+        log(`ESP32 serial ${conn.port} (${conn.deviceInfo?.board ?? lastKnownDeviceInfoByPort.get(conn.port)?.board ?? 'unknown'}) read nothing for ${Math.round(CDC_SILENT_READ_TIMEOUT_MS / 1000)}s after connect — recycling`);
         recordForeignProbeFailure(conn.port);
         closeConnection(conn);
         staleCount++;
@@ -1752,6 +1767,7 @@ export function getESP32DeviceInfo(): Array<{
   otaSlotSize?: number;
   otaFreeSketchSpace?: number;
   otaReason?: string;
+  rssiDbm?: number;
 }> {
   const now = Date.now();
   return connections
@@ -1942,6 +1958,7 @@ export function getSerialConnectionStatus(): Array<{
   processingCount?: number;
   repaintCount?: number;
   fullRefreshCount?: number;
+  rssiDbm?: number;
   deviceInfoFresh: boolean;
   transportOpen: boolean;
   lastReadAt: number;
@@ -1978,6 +1995,7 @@ export function getSerialConnectionStatus(): Array<{
     processingCount: c.deviceInfo?.processingCount,
     repaintCount: c.deviceInfo?.repaintCount,
     fullRefreshCount: c.deviceInfo?.fullRefreshCount,
+    rssiDbm: c.deviceInfo?.rssiDbm,
     deviceInfoFresh: c.deviceInfoFresh,
     lastReadAt: c.lastReadAt,
     lastWriteAt: c.lastWriteAt,

@@ -1465,6 +1465,13 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
         this.pendingRpc.delete(id);
       }
 
+      // Without autoReconnect this socket was the adapter's only life: say so,
+      // or the owner holds a dead adapter that its `if (adapter) return` guard
+      // then treats as connected — the daemon wedge of 2026-09-16 and 09-26.
+      if (!this.autoReconnect && !this.shutdownRequested) {
+        this.emit('exit', 0, 0);
+        return;
+      }
       this.scheduleReconnect();
     });
 
@@ -2204,6 +2211,10 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
 
     const id = 'init-1';
     const message = { type: 'req' as const, id, method: 'connect', params };
+    // A socket that never completes the handshake is never `alive`, so close
+    // it: the close handler is the one path that reconnects (or, without
+    // autoReconnect, reports exit).
+    const handshakeWs = this.ws;
 
     this.pendingRpc.set(id, {
       resolve: (payload) => {
@@ -2261,7 +2272,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
       },
       reject: (err) => {
         debug('adapter:openclaw', `Handshake failed: ${err.message}`);
-        // WebSocket will close → reconnect
+        handshakeWs?.close();
       },
       method: 'connect',
     });
@@ -2271,6 +2282,7 @@ export class OpenClawAdapter extends EventEmitter implements AgentAdapter {
       if (this.pendingRpc.has(id)) {
         this.pendingRpc.delete(id);
         debug('adapter:openclaw', 'Connect handshake timeout');
+        handshakeWs?.terminate();
       }
     }, OpenClawAdapter.RPC_TIMEOUT);
 
