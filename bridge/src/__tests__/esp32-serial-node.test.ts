@@ -970,7 +970,7 @@ describe('sanitizeRssiDbm', () => {
     expect(sanitizeRssiDbm(-120)).toBe(-120);
   });
   it('treats absent, zero, positive and non-numeric values as no reading', () => {
-    for (const v of [undefined, null, 0, 5, -121, Number.NaN, '-60']) {
+    for (const v of [undefined, null, 0, -0.1, -0.49, 5, -121, Number.NaN, '-60']) {
       expect(sanitizeRssiDbm(v)).toBeUndefined();
     }
   });

@@ -1378,9 +1378,9 @@ export function shouldRetryDeviceInfoIdentify(
 
 /** A board-reported RSSI in dBm, or undefined when absent or implausible. */
 export function sanitizeRssiDbm(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) && value >= -120 && value < 0
-    ? Math.round(value)
-    : undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < -120 || value >= 0) return undefined;
+  const rounded = Math.round(value);
+  return rounded < 0 ? rounded : undefined;
 }
 
 function denylistForeignPort(port: string, reason: string): void {
