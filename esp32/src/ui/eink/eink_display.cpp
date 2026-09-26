@@ -2541,6 +2541,13 @@ bool wasSearching = true;
 char lastTickerShown[104] = "";
 uint32_t repaintCountValue = 0;
 uint32_t fullRefreshCountValue = 0;
+// Single producer (render task), single consumer (network task). Fixed storage
+// keeps diagnostics off the heap and prevents cross-core Serial/JSON writes.
+struct RefreshCompletion { uint32_t count, full, startedMs, durationMs; };
+RefreshCompletion refreshCompletions[4]{};
+uint32_t refreshWrite = 0;
+uint32_t refreshRead = 0;
+
 bool key1Prev = true, key2Prev = true;
 uint32_t keyLastMs = 0;
 
@@ -2611,15 +2618,33 @@ void refresh(void (*draw)(const Snap&), const Snap& s, bool full,
     // RAM retained so the next partial refresh diffs cleanly. See note above.
     display.powerOff();
 #endif
-    // Completion event, not a render request. millis subtraction is wrap-safe;
-    // the daemon retains only this numeric record, never the painted content.
-    Serial.printf("[EinkRefresh] count=%lu full=%u startedMs=%lu durationMs=%lu\n",
-        (unsigned long)__atomic_load_n(&repaintCountValue, __ATOMIC_RELAXED),
-        unsigned(actualFull), (unsigned long)refreshStartedMs,
-        (unsigned long)(uint32_t)(millis() - refreshStartedMs));
+    const uint32_t write = __atomic_load_n(&refreshWrite, __ATOMIC_RELAXED);
+    const uint32_t read = __atomic_load_n(&refreshRead, __ATOMIC_ACQUIRE);
+    // Drop diagnostics if the consumer stalls; count gaps invalidate intervals.
+    if ((uint32_t)(write - read) < 4u) {
+        refreshCompletions[write % 4u] = {
+            __atomic_load_n(&repaintCountValue, __ATOMIC_RELAXED),
+            uint32_t(actualFull), refreshStartedMs,
+            uint32_t(millis() - refreshStartedMs)};
+        __atomic_store_n(&refreshWrite, write + 1u, __ATOMIC_RELEASE);
+    }
 }
 
 }  // namespace
+
+
+void Eink::logRefreshCompletions() {
+    for (unsigned n = 0; n < 4; ++n) {
+        const uint32_t read = __atomic_load_n(&refreshRead, __ATOMIC_RELAXED);
+        if (read == __atomic_load_n(&refreshWrite, __ATOMIC_ACQUIRE)) break;
+        const RefreshCompletion event = refreshCompletions[read % 4u];
+        __atomic_store_n(&refreshRead, read + 1u, __ATOMIC_RELEASE);
+        // Network task owns both this output and serial protocol JSON lines.
+        Serial.printf("[EinkRefresh] count=%lu full=%lu startedMs=%lu durationMs=%lu\n",
+            (unsigned long)event.count, (unsigned long)event.full,
+            (unsigned long)event.startedMs, (unsigned long)event.durationMs);
+    }
+}
 
 namespace Eink {
 
