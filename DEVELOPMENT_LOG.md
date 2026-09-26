@@ -211,8 +211,8 @@ The layout proposal and precise scope are in
 The native Swift BLE path still uses its prior renderer; this desk's installed
 Node daemon owns both BLE devices. The installed daemon's changed JS modules
 were backed up and copied from this worktree's validated build, leaving shared
-master source untouched. Integrate this branch before rebuilding master or the
-temporary runtime deployment will be overwritten.
+master source untouched. That temporary deployment was subsequently replaced by the integrated master
+build (see the integration follow-up below).
 
 Verification: all five firmware builds; actual-renderer simulator previews;
 T-Embed local-selection and roster-reorder simulation; five new signal tests;
@@ -236,6 +236,16 @@ Normal launchd Node daemon (PID 3090, build 4a7bab28ae2b) remains on port 9120;
 serial lease was explicitly released after OTA. Physical panels cannot be
 captured here: validation used firmware receipts, repaint counters, BLE delivery
 and actual-renderer simulator images, not direct observation of the glass.
+
+Integration follow-up: at the user's request, commit `85ca5896` preserved all
+60 changed/new source files, including usage parity and both display recoveries.
+Master fast-forwarded without conflicts; SHA-256 comparison confirmed all 60
+files matched the pre-integration worktree. Master rebuilt successfully. The
+worktree and ignored diagnostics remain available; unrelated local browser
+artifacts and other task worktrees were preserved.
+The restarted launchd daemon (PID 25828, port 9120) reported build
+`a1ebf5d83122`, exactly matching the master dist digest. All 11 serial boards
+and both BLE panels reconnected. The temporary copied-module dependency is gone.
 
 ## 2026-09-25 — Multi-provider usage surfaces
 
